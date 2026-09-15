@@ -113,10 +113,10 @@ Once running, the Gradio API is available at `http://127.0.0.1:<port>/api/docs`
 
 ```
 yue2-mlx.pinokio.git/
-├── app/app.py                    # Gradio web UI
-   ├──  mlx_inference.py          # MLX inference wrapper
-   ├──  yue2_model.py             # AR/NAR Mixture-of-Transformers backbone in MLX.
-   ├──  yue2_vae.py               # Oobleck VAE decoder in MLX
+├──  app.py                    # Gradio web UI
+├──  mlx_inference.py          # MLX inference wrapper
+├──  yue2_model.py             # AR/NAR Mixture-of-Transformers backbone in MLX.
+├──  yue2_vae.py               # Oobleck VAE decoder in MLX
 ├── install.js                # Pinokio install script
 ├── start.js                  # Pinokio start script
 ├── update.js                 # Pinokio update script
