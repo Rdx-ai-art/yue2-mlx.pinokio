@@ -301,7 +301,7 @@ def _llm_chat(messages, api_url, model, max_tokens, temperature, api_key):
     ctx.verify_mode = ssl.CERT_NONE
 
     req = urllib.request.Request(api_url, data=data, headers=headers, method="POST")
-    with urllib.request.urlopen(req, context=ctx, timeout=300) as resp:
+    with urllib.request.urlopen(req, context=ctx, timeout=3600) as resp:
         result = json.loads(resp.read().decode("utf-8"))
 
     content = result["choices"][0]["message"]["content"]
