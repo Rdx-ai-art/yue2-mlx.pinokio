@@ -1,6 +1,10 @@
 # YUE2 // MLX — Mac-Optimized Music Generation 🎵
 
+<div align="center">
+
 ![YUE2 MLX Logo](logo.png)
+
+</div>
 
 Generate complete songs (melody, chords, vocals, and accompaniment) from text prompts using the **YuE2-3B** model on **Apple Silicon via MLX**. No PyTorch, no CUDA — pure Metal.
 
@@ -86,6 +90,9 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 
 ### LLM Writing Room
 ![Writing Room](screenshots/writing-room.png)
+
+### Generated Audio Output
+![Audio Output](screenshots/audio-output.png)
 
 ## 🔧 API Documentation
 
