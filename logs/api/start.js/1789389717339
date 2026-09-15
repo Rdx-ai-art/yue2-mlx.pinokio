@@ -1,0 +1,18 @@
+[api shell.run]
+
+The default interactive shell is now zsh.
+To update your account to use zsh, please run `chsh -s /bin/zsh`.
+For more details, please visit https://support.apple.com/kb/HT208050.
+<<PINOKIO_SHELL>>eval "$(conda shell.bash hook)" ; conda deactivate ; conda deactivate ; conda deactivate ; conda activate base ; source /Users/R/pinokio/api/yue2-mlx.pinokio.git/env/bin/activate /Users/R/pinokio/api/yue2-mlx.pinokio.git/env && python app.py --host 127.0.0.1 --port 42003
+/Users/R/pinokio/api/yue2-mlx.pinokio.git/app.py:261: UserWarning: The parameters have been moved from the Blocks constructor to the launch() method in Gradio 6.0: theme, css. Please pass these parameters to launch() instead.
+  with gr.Blocks(
+Traceback (most recent call last):
+  File "/Users/R/pinokio/api/yue2-mlx.pinokio.git/app.py", line 543, in <module>
+    main()
+  File "/Users/R/pinokio/api/yue2-mlx.pinokio.git/app.py", line 531, in main
+    demo = build_ui()
+  File "/Users/R/pinokio/api/yue2-mlx.pinokio.git/app.py", line 363, in build_ui
+    audio_output = gr.Audio(
+  File "/Users/R/pinokio/api/yue2-mlx.pinokio.git/env/lib/python3.10/site-packages/gradio/component_meta.py", line 194, in wrapper
+    return fn(self, **kwargs)
+TypeError: Audio.__init__() got an unexpected keyword argument 'sample_rate'

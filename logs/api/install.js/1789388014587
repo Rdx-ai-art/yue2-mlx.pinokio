@@ -1,0 +1,10 @@
+[api shell.run]
+
+The default interactive shell is now zsh.
+To update your account to use zsh, please run `chsh -s /bin/zsh`.
+For more details, please visit https://support.apple.com/kb/HT208050.
+<<PINOKIO_SHELL>>eval "$(conda shell.bash hook)" ; conda deactivate ; conda deactivate ; conda deactivate ; conda activate base && hf download ahmadw/YuE2-3B-MLX --include "yue2_model.py" "yue2_vae.py" "qwen.tiktoken" "yue2_generation_config.json" --local-dir models/YuE2-3B-MLX
+/Users/R/pinokio/bin/miniforge/lib/python3.10/site-packages/huggingface_hub/cli/download.py:187: UserWarning: Ignoring `--include` since filenames have been explicitly set.
+  warnings.warn("Ignoring `--include` since filenames have been explicitly set.")
+Error: Local entry not found. [Errno 9] Bad file descriptor
+Hint: set HF_DEBUG=1 as environment variable for full traceback.

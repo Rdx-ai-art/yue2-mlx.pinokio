@@ -1,0 +1,23 @@
+2026-09-15T08:09:16.349Z [api kernel.bin.exec] 
+2026-09-15T08:09:16.349Z [api kernel.bin.exec] ████
+2026-09-15T08:09:16.349Z [api kernel.bin.exec] ██ Starting Shell shell/Users/R/pinokio/api/yue2-mlx.pinokio.git_dev.bash.plain?session=d1da2794-f744-4f75-857b-a25744dedf9a
+2026-09-15T08:09:16.349Z [api kernel.bin.exec] 
+2026-09-15T08:09:16.899Z [api kernel.bin.exec] 
+2026-09-15T08:09:16.899Z [api kernel.bin.exec] The default interactive shell is now zsh.
+2026-09-15T08:09:16.899Z [api kernel.bin.exec] To update your account to use zsh, please run `chsh -s /bin/zsh`.
+2026-09-15T08:09:16.899Z [api kernel.bin.exec] For more details, please visit https://support.apple.com/kb/HT208050.
+2026-09-15T08:09:16.899Z [api kernel.bin.exec] 
+2026-09-15T08:09:16.899Z [api kernel.bin.exec] <<PINOKIO_SHELL>>
+2026-09-15T08:09:16.901Z [api kernel.bin.exec] eval "$(conda shell.
+2026-09-15T08:09:16.902Z [api kernel.bin.exec] ivate base
+2026-09-15T08:09:16.902Z [api kernel.bin.exec] 
+2026-09-15T08:09:16.901Z [api kernel.bin.exec] bash hook)" ; conda deactivate ; conda deactivate ; conda deactivate ; conda act
+2026-09-15T08:09:19.137Z [api kernel.bin.exec] (base) <<PINOKIO_SHELL>>
+2026-09-15T08:09:27.260Z [api kernel.bin.exec] git init
+2026-09-15T08:09:27.744Z [api kernel.bin.exec] 
+2026-09-15T08:09:27.744Z [api kernel.bin.exec] 
+2026-09-15T08:09:27.776Z [api kernel.bin.exec] Initialized empty Git repository in /Users/R/pinokio/api/yue2-mlx.pinokio.git/.git/
+2026-09-15T08:09:27.776Z [api kernel.bin.exec] 
+2026-09-15T08:09:27.776Z [api kernel.bin.exec] (base) <<PINOKIO_SHELL>>
+2026-09-15T08:10:14.658Z [api kernel.bin.exec] git add .
+2026-09-15T08:10:14.658Z [api kernel.bin.exec] 

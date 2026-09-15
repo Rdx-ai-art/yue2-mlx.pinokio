@@ -1,0 +1,18 @@
+# Model weights (downloaded on first use)
+models/
+
+# Generated songs
+outputs/
+runs/
+
+# Virtual environment
+env/
+__pycache__/
+*.pyc
+
+# Downloaded inference files (can be re-downloaded)
+yue2_model.py
+yue2_vae.py
+
+# OS files
+.DS_Store

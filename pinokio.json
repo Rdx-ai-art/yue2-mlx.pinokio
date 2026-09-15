@@ -1,0 +1,11 @@
+{
+  "title": "YUE2 // MLX",
+  "description": "Mac-optimized YuE2 music generation using native MLX inference. Generate complete songs (melody, chords, vocals, accompaniment) from text prompts. Features an LLM Writing Room for lyric composition via OpenAI-compatible APIs (LM Studio, etc.). Pure Apple Silicon — no PyTorch needed.",
+  "icon": "icon.png",
+  "platform": "darwin",
+  "links": [
+    { "title": "YuE2 (upstream)", "value": "https://github.com/multimodal-art-projection/YuE" },
+    { "title": "MLX Model", "value": "https://huggingface.co/ahmadw/YuE2-3B-MLX" },
+    { "title": "Gradio UI", "value": "https://www.gradio.app" }
+  ]
+}
