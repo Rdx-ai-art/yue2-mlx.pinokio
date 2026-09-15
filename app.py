@@ -98,7 +98,7 @@ def unload_pipeline():
 
 def _generate_song(
     style, lyrics, cot, seed, cfg_scale, steps, variant, model_dir,
-    abc_text, tile_size, vae_tile,
+    abc_text, tile_size, vae_tile, save_format, mp3_bitrate,
     progress=gr.Progress(),
 ):
     """Generate a song using the MLX pipeline."""
@@ -164,9 +164,23 @@ def _generate_song(
     abc = result.get("abc", "")
     duration_s = len(audio) / 48000.0
 
-    # Gradio 6.x expects (sample_rate, array) tuple
+    # Normalize audio to prevent clipping/distortion
     if isinstance(audio, np.ndarray) and audio.dtype != object:
-        # Convert float32 to int16 to avoid Gradio conversion warning
+        # Ensure float32
+        if audio.dtype != np.float32:
+            audio = audio.astype(np.float32)
+        # Normalize to [-1, 1] range with headroom
+        max_val = np.max(np.abs(audio))
+        if max_val > 0:
+            # First clip to prevent extreme values
+            audio = np.clip(audio, -1.5, 1.5)
+            # Scale to near full range with 10% headroom
+            scale = 0.9 / max(max_val, 0.001)
+            audio = audio * scale
+
+    # Keep normalized float32 for saving, convert to int16 only for Gradio display
+    audio_for_save = audio.copy() if isinstance(audio, np.ndarray) else audio
+    if isinstance(audio, np.ndarray) and audio.dtype != object:
         audio_int16 = (np.clip(audio, -1, 1) * 32767).astype("<i2")
         audio = (48000, audio_int16)
 
@@ -179,27 +193,71 @@ def _generate_song(
     outputs_dir = Path(__file__).parent / "outputs"
     outputs_dir.mkdir(exist_ok=True)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    filename = f"song_{timestamp}_s{seed}.wav"
-    filepath = outputs_dir / filename
-    try:
-        # Convert to int16 WAV
-        if isinstance(audio, tuple):
-            _, audio_arr = audio
-        else:
-            audio_arr = audio
-        if len(audio_arr.shape) == 1:
-            audio_arr = audio_arr.reshape(-1, 1)
-        pcm = (np.clip(audio_arr, -1, 1) * 32767).astype("<i2")
-        import wave
-        with wave.open(str(filepath), "wb") as wf:
-            wf.setnchannels(1 if len(pcm.shape) == 1 else pcm.shape[1])
-            wf.setsampwidth(2)
-            wf.setframerate(48000)
-            wf.writeframes(pcm.tobytes())
-        info += f"\nSaved: {filename}"
-    except Exception as e:
-        info += f"\nSave error: {e}"
+    save_format = save_format or "WAV"
+    is_mp3 = save_format == "MP3"
+    mp3_bitrate = mp3_bitrate or "192k"
+    saved_filepath = None
 
+    if is_mp3:
+        # Save as MP3 using ffmpeg (pre-installed with Pinokio AI bundle)
+        wav_path = outputs_dir / f"song_{timestamp}_s{seed}.wav"
+        mp3_path = outputs_dir / f"song_{timestamp}_s{seed}.mp3"
+        try:
+            # Write temp WAV from normalized float32 audio
+            if isinstance(audio_for_save, tuple):
+                _, audio_arr = audio_for_save
+            else:
+                audio_arr = audio_for_save
+            if len(audio_arr.shape) == 1:
+                audio_arr = audio_arr.reshape(-1, 1)
+            pcm = (np.clip(audio_arr, -1, 1) * 32767).astype("<i2")
+            import wave
+            with wave.open(str(wav_path), "wb") as wf:
+                wf.setnchannels(1 if len(pcm.shape) == 1 else pcm.shape[1])
+                wf.setsampwidth(2)
+                wf.setframerate(48000)
+                wf.writeframes(pcm.tobytes())
+            # Convert to MP3 with ffmpeg
+            import subprocess
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(wav_path), "-b:a", mp3_bitrate, "-ar", "48000", str(mp3_path)],
+                capture_output=True, timeout=120, check=True
+            )
+            # Clean up temp WAV
+            wav_path.unlink(missing_ok=True)
+            filename = f"song_{timestamp}_s{seed}.mp3"
+            saved_filepath = str(mp3_path)
+            info += f"\nSaved: {filename}"
+        except Exception as e:
+            info += f"\nSave error: {e}"
+    else:
+        # Save as WAV (default)
+        filename = f"song_{timestamp}_s{seed}.wav"
+        filepath = outputs_dir / filename
+        try:
+            # Write from normalized float32 audio
+            if isinstance(audio_for_save, tuple):
+                _, audio_arr = audio_for_save
+            else:
+                audio_arr = audio_for_save
+            if len(audio_arr.shape) == 1:
+                audio_arr = audio_arr.reshape(-1, 1)
+            pcm = (np.clip(audio_arr, -1, 1) * 32767).astype("<i2")
+            import wave
+            with wave.open(str(filepath), "wb") as wf:
+                wf.setnchannels(1 if len(pcm.shape) == 1 else pcm.shape[1])
+                wf.setsampwidth(2)
+                wf.setframerate(48000)
+                wf.writeframes(pcm.tobytes())
+            saved_filepath = str(filepath)
+            info += f"\nSaved: {filename}"
+        except Exception as e:
+            info += f"\nSave error: {e}"
+
+    # Return audio tuple for playback, filepath for download
+    # If MP3 saved, return file path so download button saves MP3
+    if saved_filepath and is_mp3:
+        return saved_filepath, abc, info
     return audio, abc, info
 
 
@@ -396,6 +454,18 @@ def build_ui():
                             label="Model Variant",
                             info="8-bit: near-bf16 quality, ~2x faster decode",
                         )
+                        save_format_input = gr.Radio(
+                            choices=["WAV", "MP3"],
+                            value="WAV",
+                            label="Save Format",
+                            info="WAV for editing, MP3 for sharing",
+                        )
+                        mp3_bitrate_input = gr.Radio(
+                            choices=["128k", "192k", "256k", "320k"],
+                            value="192k",
+                            label="MP3 Bitrate",
+                            info="Higher = better quality, larger file",
+                        )
 
                         gr.Markdown("### Sampling Parameters")
                         with gr.Accordion("ABC Phase Sampling", open=False):
@@ -432,7 +502,8 @@ def build_ui():
                     fn=_generate_song,
                     inputs=[style_input, lyrics_input, cot_input, seed_input,
                             cfg_scale, steps_input, variant_input, model_dir_input,
-                            abc_score_input, tile_size_input, vae_tile_input],
+                            abc_score_input, tile_size_input, vae_tile_input, save_format_input,
+                            mp3_bitrate_input],
                     outputs=[audio_output, abc_output, status_output],
                 )
 
