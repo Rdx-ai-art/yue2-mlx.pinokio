@@ -7,7 +7,7 @@ module.exports = {
         venv: "env",
         path: ".",
         message: [
-          "pip install --upgrade mlx gradio tiktoken numpy soundfile"
+          "pip install -r requirements.txt --upgrade"
         ]
       }
     },

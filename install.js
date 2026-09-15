@@ -3,7 +3,16 @@ module.exports = {
     bundle: "ai"
   },
   run: [
-    // 1. Create virtual environment
+    // 1. Clone this launcher repo (if app.py doesn't exist)
+    {
+      when: "{{!exists('app.py')}}",
+      method: "shell.run",
+      params: {
+        message: "git clone https://github.com/Rdx-ai-art/yue2-mlx.pinokio ."
+      }
+    },
+
+    // 2. Create virtual environment
     {
       method: "shell.run",
       params: {
@@ -14,19 +23,19 @@ module.exports = {
       }
     },
 
-    // 2. Install Python dependencies in venv
+    // 3. Install Python dependencies from requirements.txt
     {
       method: "shell.run",
       params: {
         venv: "env",
         path: ".",
         message: [
-          "pip install mlx gradio>=6,<7 tiktoken numpy soundfile"
+          "pip install -r requirements.txt"
         ]
       }
     },
 
-    // 3. Download inference .py files using curl
+    // 4. Download inference .py files using curl
     {
       when: "{{!exists('yue2_model.py')}}",
       method: "shell.run",
@@ -39,7 +48,7 @@ module.exports = {
       }
     },
 
-    // 4. Create runs directory
+    // 5. Create runs directory
     {
       method: "shell.run",
       params: {
@@ -51,7 +60,7 @@ module.exports = {
       }
     },
 
-    // 5. Verification
+    // 6. Verification
     {
       method: "shell.run",
       params: {
@@ -66,7 +75,7 @@ module.exports = {
       }
     },
 
-    // 6. Notification
+    // 7. Notification
     {
       method: "notify",
       params: {
