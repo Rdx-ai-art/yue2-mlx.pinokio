@@ -394,90 +394,82 @@ def build_ui():
                         gr.Markdown("### Song Parameters")
                         style_input = gr.Textbox(
                             label="Style",
-                            placeholder="indie pop, bright acoustic guitar, soft drums, warm lead vocal",
-                            lines=3,
-                            info="Describe the musical style, genre, mood, instrumentation",
+                            placeholder="indie pop, bright acoustic guitar, warm vocal",
+                            lines=2,
                         )
                         lyrics_input = gr.Textbox(
                             label="Lyrics",
-                            placeholder="[Verse]\nSoft morning light is touching the window.\n[Chorus]\nStay with the rhythm, let it carry us home.",
-                            lines=8,
-                            info="Write lyrics with section tags: [Verse], [Chorus], [Bridge], etc.",
+                            placeholder="[Verse]\nSoft morning light...",
+                            lines=5,
                         )
                         with gr.Row():
                             cot_input = gr.Radio(
                                 choices=["full", "melody", "off"],
                                 value="off",
-                                label="Symbolic Planning (ABC Score)",
-                                info="full=chords+melody, melody=melody only, off=skip ABC",
+                                label="ABC Plan",
                             )
                             seed_input = gr.Number(
                                 value=831001,
                                 label="Seed",
                                 precision=0,
-                                info="Set seed for reproducible results",
                             )
                         with gr.Row():
                             cfg_scale = gr.Slider(
                                 minimum=0.5, maximum=3.0, value=1.0,
-                                step=0.01, label="CFG Scale",
-                                info="Classifier-free guidance (higher = more follow prompt)",
+                                step=0.01, label="CFG",
                             )
                             steps_input = gr.Slider(
                                 minimum=8, maximum=64, value=8,
                                 step=1, label="NAR Steps",
-                                info="Midpoint ODE steps (more = better quality, slower)",
                             )
+                        with gr.Row():
                             tile_size_input = gr.Slider(
                                 minimum=128, maximum=2048, value=512,
-                                step=64, label="NAR Tile Size",
-                                info="Process frames in tiles. Smaller = less RAM, larger = faster",
+                                step=64, label="NAR Tile",
                             )
                             vae_tile_input = gr.Slider(
                                 minimum=64, maximum=512, value=256,
-                                step=32, label="VAE Decode Tile",
-                                info="VAE processing tile size. Smaller = less RAM during decode (~20GB with 128)",
+                                step=32, label="VAE Tile",
                             )
 
                     with gr.Column(scale=2):
                         gr.Markdown("### Model Settings")
                         model_dir_input = gr.Textbox(
-                            label="Model Directory",
+                            label="Model Dir",
                             value="./models/YuE2-3B-MLX",
-                            info="Path to the MLX model folder (downloaded during Install)",
+                            lines=1,
                         )
                         variant_input = gr.Radio(
-                            choices=["8-bit (recommended, 4.2 GB)",
-                                     "BF16 (highest quality, 7 GB)",
-                                     "4-bit (fastest, 3.4 GB)"],
-                            value="8-bit (recommended, 4.2 GB)",
-                            label="Model Variant",
-                            info="8-bit: near-bf16 quality, ~2x faster decode",
+                            choices=["8-bit (4.2GB)", "BF16 (7GB)", "4-bit (3.4GB)"],
+                            value="8-bit (4.2GB)",
+                            label="Variant",
                         )
                         save_format_input = gr.Radio(
                             choices=["WAV", "MP3"],
                             value="WAV",
-                            label="Save Format",
-                            info="WAV for editing, MP3 for sharing",
+                            label="Format",
                         )
                         mp3_bitrate_input = gr.Radio(
                             choices=["128k", "192k", "256k", "320k"],
                             value="192k",
-                            label="MP3 Bitrate",
-                            info="Higher = better quality, larger file",
+                            label="MP3 kbps",
                         )
 
-                        gr.Markdown("### Sampling Parameters")
-                        with gr.Accordion("ABC Phase Sampling", open=False):
-                            abc_temp = gr.Slider(0.1, 2.0, value=0.7, step=0.05, label="Temperature")
-                            abc_p = gr.Slider(0.1, 1.0, value=0.9, step=0.05, label="Top P")
-                            abc_k = gr.Slider(1, 100, value=30, step=1, label="Top K")
-                            abc_rep = gr.Slider(0.5, 2.0, value=1.0, step=0.01, label="Repetition Penalty")
-                        with gr.Accordion("Semantic Phase Sampling", open=False):
-                            sem_temp = gr.Slider(0.1, 2.0, value=1.0, step=0.05, label="Temperature")
-                            sem_p = gr.Slider(0.1, 1.0, value=0.95, step=0.05, label="Top P")
-                            sem_k = gr.Slider(1, 200, value=100, step=1, label="Top K")
-                            sem_rep = gr.Slider(0.5, 2.0, value=1.2, step=0.01, label="Repetition Penalty")
+                        gr.Markdown("### Advanced Sampling")
+                        with gr.Accordion("ABC Phase", open=False):
+                            with gr.Row():
+                                abc_temp = gr.Slider(0.1, 2.0, value=0.7, step=0.05, label="Temp")
+                                abc_p = gr.Slider(0.1, 1.0, value=0.9, step=0.05, label="Top P")
+                            with gr.Row():
+                                abc_k = gr.Slider(1, 100, value=30, step=1, label="Top K")
+                                abc_rep = gr.Slider(0.5, 2.0, value=1.0, step=0.01, label="Rep Pen")
+                        with gr.Accordion("Semantic Phase", open=False):
+                            with gr.Row():
+                                sem_temp = gr.Slider(0.1, 2.0, value=1.0, step=0.05, label="Temp")
+                                sem_p = gr.Slider(0.1, 1.0, value=0.95, step=0.05, label="Top P")
+                            with gr.Row():
+                                sem_k = gr.Slider(1, 200, value=100, step=1, label="Top K")
+                                sem_rep = gr.Slider(0.5, 2.0, value=1.2, step=0.01, label="Rep Pen")
 
                         generate_btn = gr.Button("🎵 Generate Song", variant="primary", size="lg", elem_classes="generate-btn")
 
@@ -642,36 +634,42 @@ def build_ui():
                     outputs=[style_input],
                 )
 
-            # ── TAB 3: Settings ──────────────────────────────────────
+            # ── TAB 3: INFO ────────────────────────────────────────
             with gr.Tab("03 // INFO"):
-                gr.Markdown("### Model & Runtime Settings")
+                gr.Markdown("### Generation Parameters")
                 gr.Markdown(
-                    "| Setting | Description |\n"
-                    "|---------|------------|\n"
-                    "| **Model Variant** | 4-bit uses ~2GB RAM vs 8-bit ~4GB (recommended for low memory) |\n"
-                    "| **NAR Steps** | Fewer steps = faster, lower quality. 8 is a good balance. |\n"
-                    "| **Symbolic Planning** | `off` skips ABC generation, saves ~30% time |\n"
-                    "| **LLM API** | Connect LM Studio (default: 127.0.0.1:1234) |\n"
+                    "| Parameter | Description | Recommended |\n"
+                    "|-----------|-------------|-------------|\n"
+                    "| **CFG Scale** | Classifier-free guidance. Higher = follows prompt more strictly | 1.0 |\n"
+                    "| **NAR Steps** | Midpoint ODE steps. More = better quality but slower | 8-16 |\n"
+                    "| **NAR Tile** | Process frames in tiles. Smaller = less RAM, lower quality | 512-1024 |\n"
+                    "| **VAE Tile** | VAE decode tile size. Lower = less RAM during decode | 128-256 |\n"
+                    "| **Symbolic Plan** | ABC score generation. `off` skips, saves ~30% time | off |\n"
+                    "| **Seed** | Set for reproducible results | 831001 |\n"
                 )
-                gr.Markdown("### Memory Usage")
+
+                gr.Markdown("### Memory & Performance")
                 gr.Markdown(
-                    "| Variant | Model Size | Approx RAM Usage |\n"
-                    "|---------|-----------|------------------|\n"
-                    "| **4-bit** | ~2.1 GB | ~20-25 GB (recommended for 16GB Macs) |\n"
-                    "| **8-bit** | ~4.2 GB | ~30-40 GB (recommended for 32GB+ Macs) |\n"
-                    "| **BF16** | ~7 GB | ~40-50 GB (best quality, highest RAM) |\n\n"
-                    "> Memory includes model weights, KV caches, NAR state, VAE, and Python overhead. "
-                    "For 16GB Macs, use **4-bit** variant with **Symbolic Planning: off** for best results."
+                    "| Variant | Model Size | Approx RAM |\n"
+                    "|---------|-----------|------------|\n"
+                    "| **4-bit** | ~2.1 GB | ~20-25 GB (16GB Macs) |\n"
+                    "| **8-bit** | ~4.2 GB | ~30-40 GB (32GB+ Macs) |\n"
+                    "| **BF16** | ~7 GB | ~40-50 GB (best quality) |\n\n"
+                    "> **VAE Tile** — Lower this to reduce memory spikes during decode. Default 256 is fine for most users.\n"
+                    "> **NAR Tile** — Further reduces RAM but lowers output quality. Experimental.\n"
+                    "> Peak memory occurs during VAE decode, not model loading."
                 )
+
                 gr.Markdown("### Hardware Requirements")
                 gr.Markdown(
                     "| Component | Minimum | Recommended |\n"
                     "|-----------|---------|-------------|\n"
-                    "| **Chip** | M1 / M2 / M3 / M4 | M1 Pro/Max or better |\n"
+                    "| **Chip** | M1/M2/M3/M4 | M1 Pro/Max or better |\n"
                     "| **RAM** | 16 GB | 32 GB+ |\n"
-                    "| **Storage** | 10 GB | 20 GB+ |\n"
-                    "| **Generation Time** | ~5-10 min (2 min song) | ~3-5 min |\n"
+                    "| **Storage** | 12 GB free | 25 GB free |\n"
+                    "| **Generation** | ~5-15 min (2 min song) | ~3-8 min |\n"
                 )
+
                 gr.Markdown("### Tips")
                 gr.Markdown(
                     "- **8-bit variant** gives near-bF16 quality at ~2x decode speed\n"
@@ -679,6 +677,7 @@ def build_ui():
                     "- Set a **seed** for reproducible results\n"
                     "- **cot=full** generates chord-annotated ABC scores for editing\n"
                     "- The MLX backend requires **no PyTorch** — pure Apple Metal\n"
+                    "- All generated songs save to `outputs/` folder in the app directory\n"
                 )
 
     return demo
@@ -719,6 +718,13 @@ def main():
             .llm-btn { font-size: 1em !important; }
             .status-box { font-family: monospace; font-size: 0.85em; background: #1a1a2e; color: #e0e0e0; padding: 10px; border-radius: 6px; }
             .audio-container { text-align: center; }
+            /* Fix scrolling for dynamically updated textboxes */
+            .gradio-container .wrap.svelte-cm5pb1 textarea,
+            .gradio-container .wrap.svelte-cm5pb1 .wrap,
+            .gradio-container .svelte-1137v4e textarea {
+                overflow-y: auto !important;
+                overscroll-behavior: contain !important;
+            }
         """,
     )
 
