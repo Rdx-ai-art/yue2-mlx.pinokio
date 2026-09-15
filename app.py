@@ -540,20 +540,22 @@ def build_ui():
                             btn_gen_lyrics = gr.Button("✨ Generate Lyrics from Idea", elem_classes="llm-btn")
                             btn_gen_style = gr.Button("🎨 Generate Style from Idea", elem_classes="llm-btn")
 
-                        gr.Markdown("### Chat")
-                        llm_chat_input = gr.Textbox(
-                            label="Chat Message",
-                            placeholder="Make the chorus more uplifting...",
-                            lines=2,
-                        )
-                        with gr.Row():
-                            btn_send = gr.Button("💬 Send", variant="secondary", elem_classes="llm-btn")
-                            btn_clear = gr.Button("🗑️ Clear Chat", variant="secondary", elem_classes="llm-btn")
+                        # ── Chat (hidden — broken, kept for future fix) ──
+                        with gr.Column(visible=False):
+                            gr.Markdown("### Chat")
+                            llm_chat_input = gr.Textbox(
+                                label="Chat Message",
+                                placeholder="Make the chorus more uplifting...",
+                                lines=2,
+                            )
+                            with gr.Row():
+                                btn_send = gr.Button("💬 Send", variant="secondary", elem_classes="llm-btn")
+                                btn_clear = gr.Button("🗑️ Clear Chat", variant="secondary", elem_classes="llm-btn")
 
-                        llm_chat_output = gr.Chatbot(
-                            label="Conversation",
-                            height=300,
-                        )
+                            llm_chat_output = gr.Chatbot(
+                                label="Conversation",
+                                height=300,
+                            )
 
                         gr.Markdown("### Lyric Editing")
                         current_lyrics = gr.Textbox(
@@ -589,23 +591,23 @@ def build_ui():
                 def _on_gen_lyrics(idea, api_url, model, max_tokens, temp, api_key):
                     messages, content = _generate_lyrics_from_idea(idea, api_url, model, max_tokens, temp, api_key)
                     lyrics, style = _parse_lyrics_from_response(content)
-                    return messages, content, lyrics, style
+                    return messages, content, lyrics, style, lyrics, style
 
                 def _on_gen_style(idea, api_url, model, max_tokens, temp, api_key):
                     messages, content = _generate_style_from_idea(idea, api_url, model, max_tokens, temp, api_key)
                     lyrics, style = _parse_lyrics_from_response(content)
-                    return messages, content, lyrics, style
+                    return messages, content, lyrics, style, lyrics, style
 
                 # Quick action handlers
                 btn_gen_lyrics.click(
                     fn=_on_gen_lyrics,
                     inputs=[idea_input, llm_api_url, llm_model, llm_max_tokens, llm_temp, llm_api_key],
-                    outputs=[llm_chat_output, llm_output, gen_lyrics_state, gen_style_state],
+                    outputs=[llm_chat_output, llm_output, gen_lyrics_state, gen_style_state, current_lyrics, style_input],
                 )
                 btn_gen_style.click(
                     fn=_on_gen_style,
                     inputs=[idea_input, llm_api_url, llm_model, llm_max_tokens, llm_temp, llm_api_key],
-                    outputs=[llm_chat_output, llm_output, gen_lyrics_state, gen_style_state],
+                    outputs=[llm_chat_output, llm_output, gen_lyrics_state, gen_style_state, current_lyrics, style_input],
                 )
                 btn_send.click(
                     fn=_llm_chat,
@@ -622,15 +624,23 @@ def build_ui():
                     outputs=[llm_chat_output, llm_output],
                 )
 
-                # Copy buttons — copy parsed content to Generate tab inputs
+                # Copy buttons — parse lyrics/style from LLM response window and copy to Generate tab
+                def _copy_lyrics_from_output(raw_response):
+                    lyrics, _ = _parse_lyrics_from_response(raw_response)
+                    return lyrics
+
+                def _copy_style_from_output(raw_response):
+                    _, style = _parse_lyrics_from_response(raw_response)
+                    return style
+
                 btn_copy_lyrics.click(
-                    fn=lambda x: x,
-                    inputs=[gen_lyrics_state],
+                    fn=_copy_lyrics_from_output,
+                    inputs=[llm_output],
                     outputs=[lyrics_input],
                 )
                 btn_copy_style.click(
-                    fn=lambda x: x,
-                    inputs=[gen_style_state],
+                    fn=_copy_style_from_output,
+                    inputs=[llm_output],
                     outputs=[style_input],
                 )
 
