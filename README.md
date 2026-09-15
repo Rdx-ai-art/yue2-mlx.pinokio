@@ -146,9 +146,9 @@ yue2-mlx.pinokio.git/
 
 ## 🐛 Troubleshooting
 
-- **Model not found** — Run Install again to download model weights
-- **Out of memory** — Switch to 4-bit variant in the UI
-- **Slow generation** — Reduce NAR Steps from 32 to 16 (lower quality)
+- **Model not found** — Run Install/Select Model and Generate again to download model weights
+- **Out of memory** — Switch to 4-bit variant in the UI, Use Lower VAE tile, and optionally lower NAR tile(will reduce quality)
+- **Slow generation** — Reduce NAR Steps from 32 to 8 (speed/quality compromise)
 - **LM Studio connection** — Make sure LM Studio is running and listening on the configured API URL
 - **MLX import error** — Ensure you're on Apple Silicon (this app won't work on Intel Macs)
 
