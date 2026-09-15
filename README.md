@@ -23,7 +23,7 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 - **Native MLX Inference** — Runs on Apple Metal via MLX framework
 - **Three Quantization Options** — BF16 (highest quality), 8-bit (recommended), 4-bit (fastest)
 - **Smart Memory Management** — User Configurable VAE TILING | Models range from 3.4 GB (4-bit) to 7 GB (BF16)
-- **Less Overhead ** — Much lower memory overhead than PyTorch MPS
+- **Less Overhead** — Much lower memory overhead than PyTorch MPS
 
 ## 💻 Requirements
 
