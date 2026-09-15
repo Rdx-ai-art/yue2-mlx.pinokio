@@ -1,8 +1,0 @@
-[api shell.run]
-
-The default interactive shell is now zsh.
-To update your account to use zsh, please run `chsh -s /bin/zsh`.
-For more details, please visit https://support.apple.com/kb/HT208050.
-<<PINOKIO_SHELL>>eval "$(conda shell.bash hook)" ; conda deactivate ; conda deactivate ; conda deactivate ; conda activate base && source env/bin/activate && pip install --upgrade pip
-Requirement already satisfied: pip in ./env/lib/python3.10/site-packages (26.2.1)
-(env) (base) <<PINOKIO_SHELL>>

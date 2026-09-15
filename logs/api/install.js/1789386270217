@@ -1,7 +1,0 @@
-[api shell.run]
-
-The default interactive shell is now zsh.
-To update your account to use zsh, please run `chsh -s /bin/zsh`.
-For more details, please visit https://support.apple.com/kb/HT208050.
-<<PINOKIO_SHELL>>eval "$(conda shell.bash hook)" ; conda deactivate ; conda deactivate ; conda deactivate ; conda activate base ; source /Users/R/pinokio/api/yue2-mlx.pinokio.git/env/bin/activate /Users/R/pinokio/api/yue2-mlx.pinokio.git/env && pip install mlx gradio>=4.0.0 tiktoken numpy soundfile huggingface_hub[hf_xet]
-(env) (base) <<PINOKIO_SHELL>>
