@@ -16,3 +16,9 @@ yue2_vae.py
 
 # OS files
 .DS_Store
+
+# Cache files 
+cache/
+
+#logs
+logs/
