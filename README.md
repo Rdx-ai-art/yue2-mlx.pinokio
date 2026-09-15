@@ -1,5 +1,7 @@
 # YUE2 // MLX — Mac-Optimized Music Generation 🎵
 
+![YUE2 MLX Logo](logo.png)
+
 Generate complete songs (melody, chords, vocals, and accompaniment) from text prompts using the **YuE2-3B** model on **Apple Silicon via MLX**. No PyTorch, no CUDA — pure Metal.
 
 ## ✨ What is YUE2 // MLX?
@@ -16,8 +18,8 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 
 - **Native MLX Inference** — Runs on Apple Metal via MLX framework
 - **Three Quantization Options** — BF16 (highest quality), 8-bit (recommended), 4-bit (fastest)
-- **Smart Memory Management** — Efficient VAE TILING | Models range from 3.4 GB (4-bit) to 7 GB (BF16)
-- **No Swap Pressure** — Much lower memory overhead than PyTorch MPS
+- **Smart Memory Management** — User Configurable VAE TILING | Models range from 3.4 GB (4-bit) to 7 GB (BF16)
+- **Less Overhead ** — Much lower memory overhead than PyTorch MPS
 
 ## 💻 Requirements
 
@@ -76,6 +78,17 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 - **Seed** — Set for reproducible results (default: 831001)
 - **VAE Tile** — Set for lowering memory usage.Default is good enough for most users.
 - **NAR Tile** — Optional method to further lower memory usage at the expense of much lower quality output. Experimental.
+
+## 📸 Screenshots
+
+### GENERATE Tab
+![Generate Tab](screenshots/generate.png)
+
+### LLM Writing Room
+![Writing Room](screenshots/writing-room.png)
+
+### Generated Audio Output
+![Audio Output](screenshots/audio-output.png)
 
 ## 🔧 API Documentation
 
