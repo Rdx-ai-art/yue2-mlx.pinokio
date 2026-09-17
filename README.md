@@ -30,10 +30,10 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
 | **Chip** | M1 / M2 / M3 / M4 | M1 Pro/Max or better |
-| **RAM** | **16 GB** | **32 GB+** |
+| **RAM** | **16 GB** | **24 GB+** |
 | **OS** | macOS 14 (Sonoma) | macOS 15+ (Sequoia) |
-| **Storage** | 12 GB Free | 25 GB Free |
-| **Generation Time** | ~5-15 min (2 min song) | ~3-8 min |
+| **Storage** | 5 GB Free | 12 GB Free |
+| **Generation Time** | ~1.2 min (2 min song) | ~3.1 min (4 min song) |
 
 ## 📦 Installation (One-Click)
 
@@ -126,10 +126,10 @@ Once running, the Gradio API is available at `http://127.0.0.1:<port>/api/docs`
 
 ```
 yue2-mlx.pinokio.git/
-├──  app.py                    # Gradio web UI
-├──  mlx_inference.py          # MLX inference wrapper
-├──  yue2_model.py             # AR/NAR Mixture-of-Transformers backbone in MLX.
-├──  yue2_vae.py               # Oobleck VAE decoder in MLX
+├── app.py                    # Gradio web UI
+├── mlx_inference.py          # MLX inference wrapper
+├── yue2_model.py             # AR/NAR Mixture-of-Transformers backbone in MLX
+├── yue2_vae.py               # Oobleck VAE decoder in MLX
 ├── install.js                # Pinokio install script
 ├── start.js                  # Pinokio start script
 ├── update.js                 # Pinokio update script
@@ -138,11 +138,20 @@ yue2-mlx.pinokio.git/
 ├── pinokio.json              # Pinokio metadata
 ├── .gitignore
 ├── README.md
+├── outputs/                  # Auto-generated song folders (not tracked in git)
+│   └── song_<timestamp>_s<seed>/
+│       ├── song_<timestamp>_s<seed>.wav  (or .mp3)
+│       └── metadata.json               # Generation parameters & info
 └── models/YuE2-3B-MLX/       # Downloaded during install
     ├── bf16/                 # BF16 model (7 GB)
     ├── 8bit/                 # 8-bit model (4.2 GB)
     └── 4bit/                 # 4-bit model (3.4 GB)
 ```
+
+Each generated song gets its own folder in `outputs/` with a `metadata.json` containing:
+`song_name`, `timestamp`, `duration_s`, `gen_time_s`, `seed`, `cot`, `steps`, `cfg_scale`,
+`nar_tile`, `vae_tile`, `style`, `lyrics`, `save_format`, `mp3_bitrate`, `filename`,
+`filepath`, and `abc` (if applicable).
 
 ## 🐛 Troubleshooting
 

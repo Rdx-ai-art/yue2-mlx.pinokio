@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import gc
 import json
 import math
 import sys
@@ -269,7 +270,10 @@ def synthesize(model, prefix, codec, seed, steps=32, noise=None, on_progress=Non
                 on_progress(step + 1, steps)
         out.append(state.astype(mx.float32))
 
-    return mx.concatenate(out)
+    # Convert to numpy incrementally to avoid mx.concatenate() spike
+    tiles_np = [np.array(t) for t in out]
+    del out
+    return np.concatenate(tiles_np, axis=0)
 
 
 def _tile_ranges(n, tile_size):
@@ -462,14 +466,22 @@ class Yue2PipelineMLX:
         latents = synthesize(self.model, prefix, codec, seed, n_steps, tile_size=tile_size, on_progress=nar_cb)
 
         # 4. VAE decode to waveform
+        # Convert to bfloat16 to halve latent tensor memory (negligible quality loss)
+        latents_bf16 = latents.astype(mx.bfloat16) if latents.dtype == mx.float32 else latents
+        del latents
+        gc.collect()
+
+        # Clear Metal cache of AR/NAR model weights before VAE decode
+        mx.clear_cache()
+
         log("[vae] decoding")
-        audio_np = np.array(self.vae.decode_tiled(latents, core=vae_tile))
+        audio_np = np.array(self.vae.decode_tiled(latents_bf16, core=vae_tile))
         audio = np.clip(audio_np, -1, 1)
         return {
             "audio": audio,
             "abc": abc_text,
             "codec": codec,
-            "latents": np.array(latents),
+            "latents": latents_bf16,
             "prefix": prefix,
         }
 

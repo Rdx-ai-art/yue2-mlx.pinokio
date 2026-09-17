@@ -26,6 +26,7 @@ import wave
 from pathlib import Path
 
 import gradio as gr
+import mlx.core as mx
 import numpy as np
 
 # ---------------------------------------------------------------------------
@@ -186,13 +187,18 @@ def _generate_song(
 
     info = (
         f"Done: {duration_s:.1f}s audio in {elapsed:.0f}s\n"
-        f"seed={seed}  cot={cot}  steps={steps}"
+        f"seed={seed}  cot={cot}  steps={steps}\n"
+        f"elapsed={elapsed:.0f}s"
     )
 
-    # Save to outputs folder
+    # Save to outputs folder — each song gets its own directory
     outputs_dir = Path(__file__).parent / "outputs"
     outputs_dir.mkdir(exist_ok=True)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
+    song_name = f"song_{timestamp}_s{seed}"
+    song_dir = outputs_dir / song_name
+    song_dir.mkdir(exist_ok=True)
+
     save_format = save_format or "WAV"
     is_mp3 = save_format == "MP3"
     mp3_bitrate = mp3_bitrate or "192k"
@@ -200,8 +206,8 @@ def _generate_song(
 
     if is_mp3:
         # Save as MP3 using ffmpeg (pre-installed with Pinokio AI bundle)
-        wav_path = outputs_dir / f"song_{timestamp}_s{seed}.wav"
-        mp3_path = outputs_dir / f"song_{timestamp}_s{seed}.mp3"
+        wav_path = song_dir / f"{song_name}.wav"
+        mp3_path = song_dir / f"{song_name}.mp3"
         try:
             # Write temp WAV from normalized float32 audio
             if isinstance(audio_for_save, tuple):
@@ -225,15 +231,15 @@ def _generate_song(
             )
             # Clean up temp WAV
             wav_path.unlink(missing_ok=True)
-            filename = f"song_{timestamp}_s{seed}.mp3"
+            filename = f"{song_name}.mp3"
             saved_filepath = str(mp3_path)
             info += f"\nSaved: {filename}"
         except Exception as e:
             info += f"\nSave error: {e}"
     else:
         # Save as WAV (default)
-        filename = f"song_{timestamp}_s{seed}.wav"
-        filepath = outputs_dir / filename
+        filename = f"{song_name}.wav"
+        filepath = song_dir / filename
         try:
             # Write from normalized float32 audio
             if isinstance(audio_for_save, tuple):
@@ -253,6 +259,35 @@ def _generate_song(
             info += f"\nSaved: {filename}"
         except Exception as e:
             info += f"\nSave error: {e}"
+
+    # Save metadata JSON
+    metadata = {
+        "song_name": song_name,
+        "timestamp": timestamp,
+        "duration_s": round(duration_s, 2),
+        "gen_time_s": round(elapsed, 1),
+        "seed": seed,
+        "cot": cot,
+        "steps": int(steps),
+        "cfg_scale": float(cfg_scale) if cfg_scale else None,
+        "nar_tile": int(tile_size),
+        "vae_tile": int(vae_tile),
+        "style": style.strip(),
+        "lyrics": lyrics.strip(),
+        "save_format": save_format,
+        "mp3_bitrate": mp3_bitrate if is_mp3 else None,
+        "filename": filename,
+        "filepath": saved_filepath,
+    }
+    if abc and abc_text:
+        metadata["abc"] = abc_text
+    try:
+        metadata_path = song_dir / "metadata.json"
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+        info += f"\nMetadata: metadata.json"
+    except Exception as e:
+        info += f"\nMetadata save error: {e}"
 
     # Return audio tuple for playback, filepath for download
     # If MP3 saved, return file path so download button saves MP3
@@ -366,6 +401,46 @@ def _parse_lyrics_from_response(content):
     return content.strip(), ""
 
 
+def _detect_models(api_url, api_key):
+    """Detect available models from an OpenAI-compatible API.
+    Returns the first model name as a string, or an error message."""
+    import urllib.request
+    import ssl
+
+    if not api_url.strip():
+        return "Please enter an API URL first"
+
+    # Strip /chat/completions suffix if present
+    base_url = api_url.rstrip("/")
+    if base_url.endswith("/chat/completions"):
+        base_url = base_url.rsplit("/", 1)[0]
+
+    models_url = f"{base_url}/v1/models"
+    headers = {}
+    if api_key.strip():
+        headers["Authorization"] = f"Bearer {api_key.strip()}"
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    req = urllib.request.Request(models_url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+            models = result.get("data", [])
+            if models:
+                first_model = models[0].get("id", "")
+                if first_model:
+                    return first_model
+                return "No model name found (check API response)"
+            return "No models available — load a model in your LLM server"
+    except urllib.error.HTTPError as e:
+        return f"HTTP {e.code}: Check API URL (expected OpenAI-compatible endpoint)"
+    except Exception as e:
+        return f"Connection failed: {type(e).__name__}"
+
+
 _CLEARED = __import__("threading").Event()
 
 
@@ -424,11 +499,11 @@ def build_ui():
                             )
                         with gr.Row():
                             tile_size_input = gr.Slider(
-                                minimum=128, maximum=2048, value=512,
+                                minimum=128, maximum=2048, value=2048,
                                 step=64, label="NAR Tile",
                             )
                             vae_tile_input = gr.Slider(
-                                minimum=64, maximum=512, value=256,
+                                minimum=64, maximum=512, value=64,
                                 step=32, label="VAE Tile",
                             )
 
@@ -518,8 +593,10 @@ def build_ui():
                         llm_model = gr.Textbox(
                             label="Model Name",
                             placeholder="auto-detect",
-                            info="Leave blank to use the running model, or specify one",
+                            info="Leave blank to auto-detect from API, or specify one",
                         )
+                        with gr.Row():
+                            btn_auto_detect = gr.Button("🔍 Auto-detect Model", variant="secondary", size="sm")
                         llm_api_key = gr.Textbox(
                             label="API Key (optional)",
                             placeholder="sk-your-key",
@@ -623,6 +700,11 @@ def build_ui():
                     inputs=[current_lyrics, expand_dir, llm_api_url, llm_model, llm_max_tokens, llm_temp, llm_api_key],
                     outputs=[llm_chat_output, llm_output],
                 )
+                btn_auto_detect.click(
+                    fn=_detect_models,
+                    inputs=[llm_api_url, llm_api_key],
+                    outputs=[llm_model],
+                )
 
                 # Copy buttons — parse lyrics/style from LLM response window and copy to Generate tab
                 def _copy_lyrics_from_output(raw_response):
@@ -652,8 +734,8 @@ def build_ui():
                     "|-----------|-------------|-------------|\n"
                     "| **CFG Scale** | Classifier-free guidance. Higher = follows prompt more strictly | 1.0 |\n"
                     "| **NAR Steps** | Midpoint ODE steps. More = better quality but slower | 8-16 |\n"
-                    "| **NAR Tile** | Process frames in tiles. Smaller = less RAM, lower quality | 512-1024 |\n"
-                    "| **VAE Tile** | VAE decode tile size. Lower = less RAM during decode | 128-256 |\n"
+                    "| **NAR Tile** | Process frames in tiles. Smaller = less RAM, lower quality | 2048 |\n"
+                    "| **VAE Tile** | VAE decode tile size. Lower = less RAM during decode | 64 |\n"
                     "| **Symbolic Plan** | ABC score generation. `off` skips, saves ~30% time | off |\n"
                     "| **Seed** | Set for reproducible results | 831001 |\n"
                 )
@@ -661,13 +743,14 @@ def build_ui():
                 gr.Markdown("### Memory & Performance")
                 gr.Markdown(
                     "| Variant | Model Size | Approx RAM |\n"
-                    "|---------|-----------|------------|\n"
-                    "| **4-bit** | ~2.1 GB | ~20-25 GB (16GB Macs) |\n"
-                    "| **8-bit** | ~4.2 GB | ~30-40 GB (32GB+ Macs) |\n"
-                    "| **BF16** | ~7 GB | ~40-50 GB (best quality) |\n\n"
-                    "> **VAE Tile** — Lower this to reduce memory spikes during decode. Default 256 is fine for most users.\n"
-                    "> **NAR Tile** — Further reduces RAM but lowers output quality. Experimental.\n"
-                    "> Peak memory occurs during VAE decode, not model loading."
+                    "|---------|-----------|------------------|\n"
+                    "| **4-bit** | ~2.1 GB | ~10-15 GB |\n"
+                    "| **8-bit** | ~4.2 GB | ~12-19 GB |\n"
+                    "| **BF16** | ~7 GB | ~20-35 GB |\n\n"
+                    "> **VAE Tile** — Lower this to reduce memory spikes during decode. Default 64 for low RAM.\n"
+                    "> **NAR Tile** — Reduces RAM but lowers quality. Higher = better quality but more RAM.\n"
+                    "> Peak memory scales with song length (more lyrics = longer generation = more RAM).\n"
+                    "> Benchmarks on M1 Max 64GB: 8-bit ~2min song = 12GB peak, ~4min song = 19GB peak."
                 )
 
                 gr.Markdown("### Hardware Requirements")
@@ -675,9 +758,9 @@ def build_ui():
                     "| Component | Minimum | Recommended |\n"
                     "|-----------|---------|-------------|\n"
                     "| **Chip** | M1/M2/M3/M4 | M1 Pro/Max or better |\n"
-                    "| **RAM** | 16 GB | 32 GB+ |\n"
-                    "| **Storage** | 12 GB free | 25 GB free |\n"
-                    "| **Generation** | ~5-15 min (2 min song) | ~3-8 min |\n"
+                    "| **RAM** | 16 GB | 24 GB+ |\n"
+                    "| **Storage** | 5 GB free | 12 GB free |\n"
+                    "| **Generation** | ~1.2 min (2 min song) | ~3.1 min (4 min song) |\n"
                 )
 
                 gr.Markdown("### Tips")
@@ -687,7 +770,15 @@ def build_ui():
                     "- Set a **seed** for reproducible results\n"
                     "- **cot=full** generates chord-annotated ABC scores for editing\n"
                     "- The MLX backend requires **no PyTorch** — pure Apple Metal\n"
-                    "- All generated songs save to `outputs/` folder in the app directory\n"
+                    "- All generated songs auto-save to `outputs/<song_name>/` with metadata.json\n"
+                )
+
+                gr.Markdown("### Metadata Fields")
+                gr.Markdown(
+                    "`metadata.json` includes: `song_name`, `timestamp`, `duration_s`, "
+                    "`gen_time_s`, `seed`, `cot`, `steps`, `cfg_scale`, `nar_tile`, "
+                    "`vae_tile`, `style`, `lyrics`, `save_format`, `mp3_bitrate`, "
+                    "`filename`, `filepath`, and `abc` (if applicable).\n"
                 )
 
     return demo

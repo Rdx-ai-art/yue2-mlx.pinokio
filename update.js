@@ -1,6 +1,16 @@
 module.exports = {
   run: [
-    // Update venv dependencies
+    // 1. Pull latest code from git
+    {
+      method: "shell.run",
+      params: {
+        message: [
+          "git pull origin main"
+        ]
+      }
+    },
+
+    // 2. Upgrade Python dependencies
     {
       method: "shell.run",
       params: {
@@ -12,10 +22,11 @@ module.exports = {
       }
     },
 
+    // 3. Notification
     {
       method: "notify",
       params: {
-        html: "Updated — Click Start to relaunch."
+        html: "<b>Update complete!</b><br/>Click <b>Start</b> to relaunch with latest changes."
       }
     }
   ]
