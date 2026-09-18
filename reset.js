@@ -10,7 +10,7 @@ module.exports = {
     },
     {
       method: "shell.run",
-      params: { message: "rm -rf yue2_model.py yue2_vae.py app.py mlx_inference.py" }
+      params: { message: "rm -f yue2_model.py yue2_vae.py app.py" }
     },
     {
       method: "notify",
