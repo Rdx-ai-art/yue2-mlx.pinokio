@@ -4,12 +4,11 @@ module.exports = {
     {
       method: "shell.run",
       params: {
-        venv: "env",
         path: ".",
         env: {
           YUE2_GROOVE_VIEW: "song"
         },
-        message: "python app.py --host 127.0.0.1 --port {{port}}",
+        message: "./env/bin/python app.py --host 127.0.0.1 --port {{port}}",
         on: [
           {
             event: "/(http:\\/\\/(?:127\\.0\\.0\\.1|localhost):\\d+)/",
