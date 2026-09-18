@@ -35,20 +35,7 @@ module.exports = {
       }
     },
 
-    // 4. Download inference .py files using curl
-    {
-      when: "{{!exists('yue2_model.py')}}",
-      method: "shell.run",
-      params: {
-        path: ".",
-        message: [
-          "curl -fsSL https://huggingface.co/ahmadw/YuE2-3B-MLX/resolve/main/yue2_model.py -o yue2_model.py",
-          "curl -fsSL https://huggingface.co/ahmadw/YuE2-3B-MLX/resolve/main/yue2_vae.py -o yue2_vae.py"
-        ]
-      }
-    },
-
-    // 5. Create runs directory
+    // 4. Create runs directory
     {
       method: "shell.run",
       params: {
@@ -60,7 +47,7 @@ module.exports = {
       }
     },
 
-    // 6. Verification
+    // 5. Verification
     {
       method: "shell.run",
       params: {
@@ -75,11 +62,11 @@ module.exports = {
       }
     },
 
-    // 7. Notification
+    // 6. Notification
     {
       method: "notify",
       params: {
-        html: "<b>Installation complete!</b><br/>Models downloaded on first use from the UI.<br/>Click <b>Start</b> — UI opens in browser."
+        html: "<b>Installation complete!</b><br/>Click <b>Start</b> — UI opens in browser."
       }
     }
   ]

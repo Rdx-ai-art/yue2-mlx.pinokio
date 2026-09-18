@@ -22,7 +22,7 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 
 - **Native MLX Inference** — Runs on Apple Metal via MLX framework
 - **Three Quantization Options** — BF16 (highest quality), 8-bit (recommended), 4-bit (fastest)
-- **Smart Memory Management** — User Configurable VAE TILING | Models range from 3.4 GB (4-bit) to 7 GB (BF16)
+- **Smart Memory Management** — smart caching and tiling keeps peak RAM under 9GB. Models range from 3.4 GB (4-bit) to 7 GB (BF16). Actual peak RAM: ~6GB (8-bit, 2min song) to ~8GB (8-bit, 4min song) on M1 Max 64GB.
 - **Less Overhead** — Much lower memory overhead than PyTorch MPS
 
 ## 💻 Requirements
@@ -30,7 +30,7 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
 | **Chip** | M1 / M2 / M3 / M4 | M1 Pro/Max or better |
-| **RAM** | **16 GB** | **24 GB+** |
+| **RAM** | **16 GB** | **16 GB+** |
 | **OS** | macOS 14 (Sonoma) | macOS 15+ (Sequoia) |
 | **Storage** | 5 GB Free | 12 GB Free |
 | **Generation Time** | ~1.2 min (2 min song) | ~3.1 min (4 min song) |
@@ -79,8 +79,8 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 - **NAR Steps** — More steps = better audio quality but longer generation (default: 8)
 - **CFG Scale** — Higher values follow the prompt more strictly (default: 1.0)
 - **Seed** — Set for reproducible results (default: 831001)
-- **VAE Tile** — Set for lowering memory usage.Default is good enough for most users.
-- **NAR Tile** — Optional method to further lower memory usage at the expense of much lower quality output. Experimental.
+- **VAE Tile** — Set for lowering memory usage.Default is set for lowest peak ram usage.
+- **NAR Tile** — Optional method to further lower memory usage, marginal speedup, but beware of occasional artifacts in generations.
 
 ## 📸 Screenshots
 
@@ -138,6 +138,10 @@ yue2-mlx.pinokio.git/
 ├── pinokio.json              # Pinokio metadata
 ├── .gitignore
 ├── README.md
+├── examples/                  # sample used for benchmarks, includes metadata for reproducing.
+│   └── 1/
+│       ├── song_<timestamp>_s<seed>.mp3
+│       └── metadata.json               # Generation parameters & info
 ├── outputs/                  # Auto-generated song folders (not tracked in git)
 │   └── song_<timestamp>_s<seed>/
 │       ├── song_<timestamp>_s<seed>.wav  (or .mp3)

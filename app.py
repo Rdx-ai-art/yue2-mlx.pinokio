@@ -279,8 +279,8 @@ def _generate_song(
         "filename": filename,
         "filepath": saved_filepath,
     }
-    if abc and abc_text:
-        metadata["abc"] = abc_text
+    if abc and abc.strip():
+        metadata["abc"] = abc
     try:
         metadata_path = song_dir / "metadata.json"
         with open(metadata_path, "w") as f:
@@ -498,13 +498,15 @@ def build_ui():
                                 step=1, label="NAR Steps",
                             )
                         with gr.Row():
-                            tile_size_input = gr.Slider(
-                                minimum=128, maximum=2048, value=2048,
-                                step=64, label="NAR Tile",
+                            tile_size_input = gr.Dropdown(
+                                choices=[1024, 2048, 3072, 4096],
+                                value=2048,
+                                label="NAR Tile",
                             )
-                            vae_tile_input = gr.Slider(
-                                minimum=64, maximum=512, value=64,
-                                step=32, label="VAE Tile",
+                            vae_tile_input = gr.Dropdown(
+                                choices=[64, 128, 256, 512, 1024],
+                                value=64,
+                                label="VAE Tile",
                             )
 
                     with gr.Column(scale=2):
@@ -730,27 +732,26 @@ def build_ui():
             with gr.Tab("03 // INFO"):
                 gr.Markdown("### Generation Parameters")
                 gr.Markdown(
-                    "| Parameter | Description | Recommended |\n"
-                    "|-----------|-------------|-------------|\n"
-                    "| **CFG Scale** | Classifier-free guidance. Higher = follows prompt more strictly | 1.0 |\n"
-                    "| **NAR Steps** | Midpoint ODE steps. More = better quality but slower | 8-16 |\n"
-                    "| **NAR Tile** | Process frames in tiles. Smaller = less RAM, lower quality | 2048 |\n"
-                    "| **VAE Tile** | VAE decode tile size. Lower = less RAM during decode | 64 |\n"
-                    "| **Symbolic Plan** | ABC score generation. `off` skips, saves ~30% time | off |\n"
-                    "| **Seed** | Set for reproducible results | 831001 |\n"
+                    "| Parameter | Description | Recommended | Default(lowest ram) |\n"
+                    "|-----------|-------------|-------------|---------------------|\n"
+                    "| **CFG Scale** | Classifier-free guidance. Higher = follows prompt more strictly | 1.0 | 1.0 |\n"
+                    "| **NAR Steps** | Midpoint ODE steps. More = better quality but slower | 12 | 8 |\n"
+                    "| **NAR Tile** | Process frames in tiles. Smaller = less RAM, lower quality | 4096 | 2048 |\n"
+                    "| **VAE Tile** | VAE decode tile size. Lower = less RAM during decode | 512 | 64 |\n"
+                    "| **ABC (Symbolic) Plan** | ABC score generation. FULL, MELODY only,`off` skips : saves ~30% time | on | off |\n"
+                    "| **Seed** | Set for reproducible results | any | any |\n"
                 )
 
                 gr.Markdown("### Memory & Performance")
                 gr.Markdown(
                     "| Variant | Model Size | Approx RAM |\n"
                     "|---------|-----------|------------------|\n"
-                    "| **4-bit** | ~2.1 GB | ~10-15 GB |\n"
-                    "| **8-bit** | ~4.2 GB | ~12-19 GB |\n"
-                    "| **BF16** | ~7 GB | ~20-35 GB |\n\n"
+                    "| **4-bit** | ~2.1 GB | ~4-8 GB peak |\n"
+                    "| **8-bit** | ~4.2 GB | ~6-9 GB peak |\n"
+                    "| **BF16** | ~7 GB | ~8-15 GB |\n\n"
                     "> **VAE Tile** — Lower this to reduce memory spikes during decode. Default 64 for low RAM.\n"
-                    "> **NAR Tile** — Reduces RAM but lowers quality. Higher = better quality but more RAM.\n"
-                    "> Peak memory scales with song length (more lyrics = longer generation = more RAM).\n"
-                    "> Benchmarks on M1 Max 64GB: 8-bit ~2min song = 12GB peak, ~4min song = 19GB peak."
+                    "> **NAR Tile** — Process frames in tiles. Lower = faster, but may introduce artifacts sometimes.\n"
+                    "> Benchmarks on M1 Max 64GB: 8-bit ~4min song = ~7GB peak = renders slightly faster than realtime on default settings.\n"
                 )
 
                 gr.Markdown("### Hardware Requirements")
@@ -758,7 +759,7 @@ def build_ui():
                     "| Component | Minimum | Recommended |\n"
                     "|-----------|---------|-------------|\n"
                     "| **Chip** | M1/M2/M3/M4 | M1 Pro/Max or better |\n"
-                    "| **RAM** | 16 GB | 24 GB+ |\n"
+                    "| **RAM** | 16 GB | 16 GB+ |\n"
                     "| **Storage** | 5 GB free | 12 GB free |\n"
                     "| **Generation** | ~1.2 min (2 min song) | ~3.1 min (4 min song) |\n"
                 )
@@ -771,6 +772,7 @@ def build_ui():
                     "- **cot=full** generates chord-annotated ABC scores for editing\n"
                     "- The MLX backend requires **no PyTorch** — pure Apple Metal\n"
                     "- All generated songs auto-save to `outputs/<song_name>/` with metadata.json\n"
+                    "- the song(along with metadata) used for benchmarking on m1 max is saved in 'examples' folder\n"
                 )
 
                 gr.Markdown("### Metadata Fields")

@@ -11,8 +11,6 @@ __pycache__/
 *.pyc
 
 # Downloaded inference files (can be re-downloaded)
-yue2_model.py
-yue2_vae.py
 
 # OS files
 .DS_Store

@@ -32,6 +32,8 @@ import base64
 import gc
 import json
 import math
+import os
+import psutil
 import sys
 import time
 import unicodedata
@@ -243,19 +245,20 @@ def _logit(t):
     return max(-20.0, min(20.0, math.log(t / (1 - t)))) if 0 < t < 1 else (20.0 if t >= 1 else -20.0)
 
 
-def synthesize(model, prefix, codec, seed, steps=32, noise=None, on_progress=None, tile_size=512):
+def synthesize(model, prefix, codec, seed, steps=32, noise=None, on_progress=None, tile_size=4096, tile_overlap=128):
     """Return latents [frames,64] float32 via midpoint ODE from t=1 → 0.
 
     Args:
-        tile_size: Process this many frames per tile. Smaller = less RAM,
-                   slightly more boundary artifacts. 512 is a good balance.
+        tile_size: Process this many frames per tile. Larger = faster.
+        tile_overlap: Extra frames processed as overlap at tile boundaries.
+                      Smooths transitions, reduces boundary artifacts.
     """
     if noise is None:
         noise = mx.random.normal((len(codec), 64), key=mx.random.key(seed))
     dt = 1.0 / steps
     out = []
 
-    for a, b in _tile_ranges(len(codec), tile_size):
+    for a, b, core_a, core_b in _tile_ranges(len(codec), tile_size, tile_overlap):
         ar_tokens = prefix + [c + CODEC_OFFSET for c in codec[a:b]] + [MUSIC_END]
         ar_cache = model.nar_prefill(ar_tokens)
 
@@ -268,7 +271,8 @@ def synthesize(model, prefix, codec, seed, steps=32, noise=None, on_progress=Non
             mx.eval(state)
             if on_progress is not None:
                 on_progress(step + 1, steps)
-        out.append(state.astype(mx.float32))
+        # Keep only the core region (discard overlap)
+        out.append(state[core_a - a: core_b - a].astype(mx.float32))
 
     # Convert to numpy incrementally to avoid mx.concatenate() spike
     tiles_np = [np.array(t) for t in out]
@@ -276,9 +280,21 @@ def synthesize(model, prefix, codec, seed, steps=32, noise=None, on_progress=Non
     return np.concatenate(tiles_np, axis=0)
 
 
-def _tile_ranges(n, tile_size):
-    """Split [0, n) into tiles of at most tile_size frames."""
-    return [(i, min(i + tile_size, n)) for i in range(0, n, tile_size)]
+def _tile_ranges(n, tile_size, overlap=0):
+    """Split [0, n) into tiles with optional overlap.
+
+    Each tile processes [start - overlap, end + overlap] frames,
+    but only the core [start, end) is kept.
+    """
+    tiles = []
+    start = 0
+    while start < n:
+        end = min(start + tile_size, n)
+        actual_start = max(0, start - overlap)
+        actual_end = min(n, end + overlap)
+        tiles.append((actual_start, actual_end, start, end))
+        start = end
+    return tiles
 
 
 # ---------------------------------------------------------------------------
@@ -407,13 +423,21 @@ class Yue2PipelineMLX:
 
     def __call__(self, style: str, lyrics: str, cot: str = "full", seed: int = 831001,
                  abc: str | None = None, cfg_scale: float | None = None,
-                 steps: int | None = None, tile_size: int = 512, vae_tile: int = 256,
+                 steps: int | None = None, tile_size: int = 4096, vae_tile: int = 256,
                  on_token=None, on_nar=None, on_vae=None, on_progress=None):
         """Generate audio from style + lyrics. Returns dict with 'audio' (numpy) and 'abc' (str)."""
         if cot not in INSTRUCTIONS:
             raise ValueError("cot must be off, melody or full")
         if abc is not None and cot == "off":
             raise ValueError("External ABC requires cot=melody/full")
+
+        # Set MLX memory limits at the START so they apply to all phases
+        # (model loading, NAR synthesis, VAE decode)
+        # Cache limit: 128MB — aggressively evicts unused tensors
+        # Memory limit: (total_RAM - 8GB) — reserves 8GB for OS
+        _total_ram_gib = psutil.virtual_memory().total / (1024**3)
+        mx.set_cache_limit(128 * 1024 * 1024)  # 128 MB cache
+        mx.set_memory_limit(int((_total_ram_gib - 8) * 1024 * 1024 * 1024))
 
         tok = self.tokenizer
         log = self.log
@@ -463,15 +487,13 @@ class Yue2PipelineMLX:
             if on_progress is not None:
                 on_progress("nar", done, total)
 
-        latents = synthesize(self.model, prefix, codec, seed, n_steps, tile_size=tile_size, on_progress=nar_cb)
+        latents = synthesize(self.model, prefix, codec, seed, n_steps, tile_size=tile_size, tile_overlap=128, on_progress=nar_cb)
 
-        # 4. VAE decode to waveform
+        # 5. VAE decode to waveform
         # Convert to bfloat16 to halve latent tensor memory (negligible quality loss)
         latents_bf16 = latents.astype(mx.bfloat16) if latents.dtype == mx.float32 else latents
         del latents
         gc.collect()
-
-        # Clear Metal cache of AR/NAR model weights before VAE decode
         mx.clear_cache()
 
         log("[vae] decoding")
