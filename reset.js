@@ -6,15 +6,11 @@ module.exports = {
     },
     {
       method: "shell.run",
-      params: { message: "rm -rf models" }
-    },
-    {
-      method: "shell.run",
       params: { message: "rm -rf runs" }
     },
     {
       method: "shell.run",
-      params: { message: "rm -f yue2_model.py yue2_vae.py" }
+      params: { message: "rm -rf yue2_model.py yue2_vae.py app.py mlx_inference.py" }
     },
     {
       method: "notify",
