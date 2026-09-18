@@ -1,6 +1,19 @@
 module.exports = {
   daemon: true,
   run: [
+    // Auto-create venv if it doesn't exist (handles cases where Install was skipped)
+    {
+      when: "{{!exists('env/bin/python')}}",
+      method: "shell.run",
+      params: {
+        message: [
+          "python3 -m venv env",
+          "./env/bin/pip install --upgrade pip",
+          "./env/bin/pip install -r requirements.txt"
+        ]
+      }
+    },
+    // Start the app
     {
       method: "shell.run",
       params: {
