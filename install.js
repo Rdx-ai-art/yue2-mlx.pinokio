@@ -18,7 +18,7 @@ module.exports = {
       params: {
         message: [
           "python3 -m venv env",
-	    "python3 -m pip install --upgrade pip"
+          "python3 -m pip install --upgrade pip"
         ]
       }
     },
@@ -54,10 +54,10 @@ module.exports = {
         venv: "env",
         path: ".",
         message: [
-       "python3 -c \"import mlx.core as mx; print('MLX version:', mx.__version__)\"",
-       "python3 -c \"import gradio; print('Gradio version:', gradio.__version__)\"",
-       "python3 -c \"import tiktoken; print('tiktoken OK')\"",
-       "python3 -c \"from pathlib import Path; assert Path('yue2_model.py').exists(), 'yue2_model.py missing'; assert Path('yue2_vae.py').exists(), 'yue2_vae.py missing'; print('Inference files OK')\""
+          "python3 -c \"import mlx.core as mx; print('MLX version:', mx.__version__)\"",
+          "python3 -c \"import gradio; print('Gradio version:', gradio.__version__)\"",
+          "python3 -c \"import tiktoken; print('tiktoken OK')\"",
+          "python3 -c \"from pathlib import Path; assert Path('yue2_model.py').exists(), 'yue2_model.py missing'; assert Path('yue2_vae.py').exists(), 'yue2_vae.py missing'; print('Inference files OK')\""
         ]
       }
     },
