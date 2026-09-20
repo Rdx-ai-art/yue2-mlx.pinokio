@@ -1,5 +1,8 @@
 # Model weights (downloaded on first use)
-models/
+models/YuE2-3B-MLX/
+models/SheetSage2/
+models/MERT-v2-FullSong/
+models/hf_cache/
 
 # Generated songs
 outputs/
@@ -21,3 +24,6 @@ cache/
 
 #logs
 logs/
+
+# Qwen Code
+.qwen/

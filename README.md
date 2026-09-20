@@ -13,6 +13,7 @@ Generate complete songs (melody, chords, vocals, and accompaniment) from text pr
 YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music generation model using native **MLX inference** (from [ahmadw/YuE2-3B-MLX](https://huggingface.co/ahmadw/YuE2-3B-MLX)). It features:
 
 - **🎵 Original Song Generation** — Style + lyrics → 48 kHz stereo song
+- **🎵 Cover Song Generation** — Upload audio → Transcribe → Generate song from the transcription, with style and lyrics(optional) input.
 - **📝 LLM Writing Room** — Compose lyrics and styles with LM Studio / Ollama / any OpenAI-compatible API
 - **🎼 ABC Score Planning** — Generate editable chord-annotated music scores (full/melody/off modes)
 - **⚡ Pure MLX Backend** — No PyTorch, no CUDA dependencies
@@ -22,7 +23,7 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 
 - **Native MLX Inference** — Runs on Apple Metal via MLX framework
 - **Three Quantization Options** — BF16 (highest quality), 8-bit (recommended), 4-bit (fastest)
-- **Smart Memory Management** — smart caching and tiling keeps peak RAM under 9GB. Models range from 3.4 GB (4-bit) to 7 GB (BF16). Actual peak RAM: ~6GB (8-bit, 2min song) to ~8GB (8-bit, 4min song) on M1 Max 64GB.
+- **Smart Memory Management** — smart caching and tiling keeps peak RAM under 9GB( with 8 bit model) . Models range from 3.4 GB (4-bit) to 7 GB (BF16) in size. Reported peak RAM: ~6GB (8-bit, 2min song) to ~8GB (8-bit, 4min song) on M1 Max 64GB.
 - **Less Overhead** — Much lower memory overhead than PyTorch MPS
 
 ## 💻 Requirements

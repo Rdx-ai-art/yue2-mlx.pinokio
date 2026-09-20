@@ -421,6 +421,18 @@ class Yue2PipelineMLX:
         sizes = {"bf16": "~7 GB", "8bit": "~4.2 GB", "4bit": "~3.4 GB"}
         return sizes.get(variant, "~unknown")
 
+    def release_models(self):
+        """Drop resident AR/NAR/VAE weights (released for cover song transcription)."""
+        import mlx.core as mx
+        self.log("[pipeline] releasing models")
+        del self.model
+        del self.vae
+        self.model = None
+        self.vae = None
+        mx.clear_cache()
+        import gc
+        gc.collect()
+
     def __call__(self, style: str, lyrics: str, cot: str = "full", seed: int = 831001,
                  abc: str | None = None, cfg_scale: float | None = None,
                  steps: int | None = None, tile_size: int = 4096, vae_tile: int = 256,

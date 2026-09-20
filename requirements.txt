@@ -4,3 +4,5 @@ tiktoken
 numpy
 soundfile
 psutil
+librosa
+mlx-yue[transcription] @ git+https://github.com/vanch007/mlx-Yue@9253ed133343406947bde7b67d43c7a63fb39d99

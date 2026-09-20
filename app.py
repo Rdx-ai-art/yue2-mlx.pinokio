@@ -25,6 +25,11 @@ import time
 import wave
 from pathlib import Path
 
+# Set HuggingFace cache to our models folder so all downloads go to one place
+HF_CACHE = Path(__file__).parent / "models" / "hf_cache"
+HF_CACHE.mkdir(parents=True, exist_ok=True)
+os.environ["HF_HOME"] = str(HF_CACHE)
+
 import gradio as gr
 import mlx.core as mx
 import numpy as np
@@ -291,9 +296,10 @@ def _generate_song(
 
     # Return audio tuple for playback, filepath for download
     # If MP3 saved, return file path so download button saves MP3
+    pipeline_status = "Done"
     if saved_filepath and is_mp3:
-        return saved_filepath, abc, info
-    return audio, abc, info
+        return saved_filepath, abc, pipeline_status, info
+    return audio, abc, pipeline_status, info
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +454,39 @@ _CLEARED = __import__("threading").Event()
 # Gradio UI
 # ---------------------------------------------------------------------------
 
+def _update_task_desc(task):
+    """Update the task description markdown based on selected task."""
+    descriptions = {
+        "full": "**Full** — Transcribe the whole arrangement and follow it closely (closest to the original)",
+        "melody-full": "**Melody-Full** — Transcribe the melody, let YuE2 write the full arrangement. Recommended for covers.",
+        "melody-vocal": "**Melody-Vocal** — Transcribe the melody and follow it with the vocal line only.",
+    }
+    return descriptions.get(task, "")
+
+
+def _check_models():
+    """Check if SheetSage2 + MERT models are downloaded. Returns status string."""
+    sheetsage_dir = HF_CACHE / "models" / "m-a-p-SheetSage2"
+    mert_dir = HF_CACHE / "models" / "m-a-p-MERT-v2-FullSong"
+
+    def _is_downloaded(dir_path, required_files):
+        if not dir_path.exists():
+            return False
+        for f in required_files:
+            if not (dir_path / f).exists():
+                return False
+        return True
+
+    # SheetSage2 is a code-heavy repo — check for config + key Python files
+    # MERT has actual model weights in safetensors format
+    sheetsage_ok = _is_downloaded(sheetsage_dir, ["config.json", "infer.py", "configuration_sheetsage2.py"])
+    mert_ok = _is_downloaded(mert_dir, ["config.json", "model.safetensors"])
+
+    if sheetsage_ok and mert_ok:
+        return "✅ All models downloaded"
+    return "❌ Models not downloaded — click 'Download Models' below"
+
+
 def build_ui():
     """Build and return the Gradio Block UI."""
 
@@ -517,8 +556,8 @@ def build_ui():
                             lines=1,
                         )
                         variant_input = gr.Radio(
-                            choices=["8-bit (4.2GB)", "BF16 (7GB)", "4-bit (3.4GB)"],
-                            value="8-bit (4.2GB)",
+                            choices=["BF16 (highest quality, 7 GB)", "8-bit (recommended, 4.2 GB)", "4-bit (fastest, 3.4 GB)"],
+                            value="8-bit (recommended, 4.2 GB)",
                             label="Variant",
                         )
                         save_format_input = gr.Radio(
@@ -565,6 +604,7 @@ def build_ui():
                         elem_classes="audio-container",
                     )
                 abc_output = gr.Textbox(label="Generated ABC Score", lines=4)
+                pipeline_status = gr.Textbox(label="🔄 Pipeline Status", interactive=False, value="Idle", lines=1)
                 status_output = gr.Textbox(label="Status", elem_classes="status-box", interactive=False)
 
                 generate_btn.click(
@@ -573,11 +613,100 @@ def build_ui():
                             cfg_scale, steps_input, variant_input, model_dir_input,
                             abc_score_input, tile_size_input, vae_tile_input, save_format_input,
                             mp3_bitrate_input],
-                    outputs=[audio_output, abc_output, status_output],
+                    outputs=[audio_output, abc_output, pipeline_status, status_output],
                 )
 
-            # ── TAB 2: LLM Writing Room ──────────────────────────────
-            with gr.Tab("02 // WRITING ROOM"):
+            # ── TAB 2: COVER ───────────────────────────────────────
+            with gr.Tab("02 // COVER"):
+                gr.Markdown("Upload audio → Transcribe → Generate song from the transcription")
+
+                # ── Model Status & Download ───────────────────────
+                gr.Markdown("### Model Status")
+                model_status_cover = gr.Textbox(
+                    label="📦 Model Status",
+                    interactive=False,
+                    value=_check_models(),
+                    lines=1,
+                )
+                with gr.Row():
+                    download_btn_cover = gr.Button("Download Models", variant="secondary", size="sm")
+                model_progress_cover = gr.Textbox(
+                    label="Download Progress",
+                    interactive=False,
+                    value="Ready",
+                    lines=1,
+                )
+                download_btn_cover.click(
+                    fn=_download_models,
+                    outputs=[model_status_cover, model_progress_cover],
+                )
+
+                with gr.Row():
+                    # LEFT side: Upload + Transcription + Generation Settings
+                    with gr.Column(scale=2):
+                        cover_audio = gr.File(
+                            label="Upload Audio (MP3/WAV/M4A/OGG/FLAC/WEBM)",
+                            type="filepath",
+                        )
+                        cover_task = gr.Radio(
+                            choices=["full", "melody-full", "melody-vocal"],
+                            value="melody-full",
+                            label="Transcription Task",
+                        )
+                        cover_task_desc = gr.Markdown(
+                            value="**Melody-Full** — Transcribe the melody, let YuE2 write the full arrangement. Recommended for covers.",
+                        )
+                        cover_task.change(
+                            fn=_update_task_desc,
+                            inputs=cover_task,
+                            outputs=cover_task_desc,
+                        )
+                        gr.Markdown("### Generation Settings")
+                        cover_seed = gr.Number(value=831001, label="Seed", precision=0)
+                        cover_cfg = gr.Slider(minimum=0.5, maximum=3, value=1, step=0.01, label="CFG")
+                        cover_steps = gr.Slider(minimum=8, maximum=64, value=8, step=1, label="NAR Steps")
+
+                    # RIGHT side: Song Parameters + Save Format
+                    with gr.Column(scale=3):
+                        gr.Markdown("### Song Parameters")
+                        cover_style = gr.Textbox(
+                            label="Style (required)",
+                            placeholder="indie pop, bright acoustic guitar, warm vocal",
+                            lines=6,
+                        )
+                        cover_lyrics = gr.Textbox(
+                            label="Lyrics (optional — song will use ABC content if left blank)",
+                            placeholder="[Verse]\nSoft morning light...",
+                            lines=8,
+                        )
+                        gr.Markdown("### Save Format")
+                        with gr.Row():
+                            cover_save_format = gr.Radio(
+                                choices=["WAV", "MP3"],
+                                value="MP3",
+                                label="Format",
+                            )
+                            cover_mp3_bitrate = gr.Radio(
+                                choices=["128k", "192k", "256k", "320k"],
+                                value="320k",
+                                label="MP3 kbps",
+                            )
+
+                cover_btn = gr.Button("🎤 Transcribe & Generate", variant="primary", size="lg", elem_classes="generate-btn")
+                cover_audio_output = gr.Audio(label="Generated Cover Song")
+                with gr.Accordion("Transcribed ABC Score", open=False):
+                    cover_abc_output = gr.Textbox(label="", lines=15)
+                cover_status = gr.Textbox(label="Status", lines=3)
+
+                cover_btn.click(
+                    fn=_cover_song,
+                    inputs=[cover_audio, cover_task, cover_style, cover_lyrics, cover_seed, cover_cfg, cover_steps, variant_input, model_dir_input,
+                            tile_size_input, vae_tile_input, cover_save_format, cover_mp3_bitrate, model_status_cover],
+                    outputs=[cover_audio_output, cover_abc_output, cover_status, model_status_cover],
+                )
+
+            # ── TAB 3: LLM Writing Room ──────────────────────────────
+            with gr.Tab("03 // WRITING ROOM"):
                 gr.Markdown(
                     "### LLM Writing Room\n"
                     "Use an OpenAI-compatible LLM (LM Studio, Ollama, text-generation-webui, etc.) "
@@ -662,6 +791,11 @@ def build_ui():
                             btn_copy_lyrics = gr.Button("📋 Copy Lyrics → Generate Tab", variant="secondary", size="sm")
                         with gr.Row():
                             btn_copy_style = gr.Button("📋 Copy Style → Generate Tab", variant="secondary", size="sm")
+                        gr.Markdown("---")
+                        with gr.Row():
+                            btn_copy_lyrics_cover = gr.Button("📋 Copy Lyrics → Cover Tab", variant="secondary", size="sm")
+                        with gr.Row():
+                            btn_copy_style_cover = gr.Button("📋 Copy Style → Cover Tab", variant="secondary", size="sm")
 
                 # State to hold generated content for copying
                 gen_lyrics_state = gr.State(value="")
@@ -727,19 +861,37 @@ def build_ui():
                     inputs=[llm_output],
                     outputs=[style_input],
                 )
+                btn_copy_lyrics_cover.click(
+                    fn=_copy_lyrics_from_output,
+                    inputs=[llm_output],
+                    outputs=[cover_lyrics],
+                )
+                btn_copy_style_cover.click(
+                    fn=_copy_style_from_output,
+                    inputs=[llm_output],
+                    outputs=[cover_style],
+                )
 
             # ── TAB 3: INFO ────────────────────────────────────────
-            with gr.Tab("03 // INFO"):
+            with gr.Tab("04 // INFO"):
                 gr.Markdown("### Generation Parameters")
                 gr.Markdown(
                     "| Parameter | Description | Recommended | Default(lowest ram) |\n"
                     "|-----------|-------------|-------------|---------------------|\n"
                     "| **CFG Scale** | Classifier-free guidance. Higher = follows prompt more strictly | 1.0 | 1.0 |\n"
                     "| **NAR Steps** | Midpoint ODE steps. More = better quality but slower | 12 | 8 |\n"
-                    "| **NAR Tile** | Process frames in tiles. Smaller = less RAM, lower quality | 4096 | 2048 |\n"
+                    "| **NAR Tile** | Process frames in tiles. Smaller = less RAM, possible lower quality/artifacts | 4096 | 2048 |\n"
                     "| **VAE Tile** | VAE decode tile size. Lower = less RAM during decode | 512 | 64 |\n"
                     "| **ABC (Symbolic) Plan** | ABC score generation. FULL, MELODY only,`off` skips : saves ~30% time | on | off |\n"
                     "| **Seed** | Set for reproducible results | any | any |\n"
+                )
+                gr.Markdown("### Cover Song")
+                gr.Markdown(
+                    "| Parameter | Description |\n"
+                    "|-----------|-------------|\n"
+                    "| **FULL** | Transcribe the whole arrangement and follow it closely (closest to the original) |\n"
+                    "| **Melody-Full** | Transcribe the melody, let YuE2 write the full arrangement. Recommended for covers. |\n"
+                    "| **Melody-Vocal** | Transcribe the melody and follow it with the vocal line only. |\n"
                 )
 
                 gr.Markdown("### Memory & Performance")
@@ -786,9 +938,314 @@ def build_ui():
     return demo
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+def _download_models(progress=gr.Progress()):
+    """Download SheetSage2 + MERT models for Cover feature."""
+    sheetsage_dir = HF_CACHE / "models" / "m-a-p-SheetSage2"
+    mert_dir = HF_CACHE / "models" / "m-a-p-MERT-v2-FullSong"
+
+    def _is_downloaded(dir_path, required_files):
+        """Check if all required files exist in the model directory."""
+        if not dir_path.exists():
+            return False
+        for f in required_files:
+            if not (dir_path / f).exists():
+                return False
+        return True
+
+    # SheetSage2 requires config.json and model.safetensors
+    # MERT requires config.json and pytorch_model.bin
+    sheetsage_ok = _is_downloaded(sheetsage_dir, ["config.json", "infer.py", "configuration_sheetsage2.py"])
+    mert_ok = _is_downloaded(mert_dir, ["config.json", "model.safetensors"])
+
+    if sheetsage_ok and mert_ok:
+        return "✅ All models downloaded", "Ready"
+
+    from huggingface_hub import snapshot_download
+
+    progress(0.0, desc="Downloading SheetSage2...")
+    try:
+        snapshot_download(
+            "m-a-p/SheetSage2",
+            local_dir=str(sheetsage_dir),
+            resume_download=True,
+        )
+        progress(0.5, desc="Downloading MERT...")
+        snapshot_download(
+            "m-a-p/MERT-v2-FullSong",
+            local_dir=str(mert_dir),
+            resume_download=True,
+        )
+        return "✅ All models downloaded", "Ready"
+    except Exception as e:
+        return f"❌ Download failed: {e}", "Error"
+
+
+def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant, model_dir,
+                tile_size, vae_tile, save_format, mp3_bitrate, model_status, progress=gr.Progress()):
+    """Transcribe audio to ABC, then generate song from the transcribed score."""
+    import tempfile
+    from pathlib import Path
+    import json
+    import time
+
+    log = print
+    _CLEARED.clear()
+    overall_start = time.perf_counter()
+
+    # Update model status
+    model_status = _check_models()
+
+    # Check if models are downloaded (raise error if not)
+    if "not downloaded" in model_status:
+        raise gr.Error(
+            "📦 Models not downloaded!\n\n"
+            "Click the 'Download Models' button above first.\n"
+            "This downloads SheetSage2 + MERT models (~3GB) for audio transcription."
+        )
+
+    # Validate task
+    if task not in {"full", "melody-full", "melody-vocal"}:
+        raise gr.Error("Invalid task. Must be: full, melody-full, or melody-vocal")
+
+    # Create temp directories
+    tmp_dir = Path(tempfile.mkdtemp())
+    transcription_dir = tmp_dir / "transcription"
+    transcription_dir.mkdir(parents=True, exist_ok=True)
+    song_dir = tmp_dir / "song"
+    song_dir.mkdir(parents=True, exist_ok=True)
+
+    # Upload audio to temp file
+    audio_path = Path(audio_file) if isinstance(audio_file, str) else Path(audio_file.name)
+
+    # Step 1: Transcribe
+    log("[transcription] transcribing audio")
+    progress(0.0, desc="Transcribing audio...")
+    t_transcribe_start = time.perf_counter()
+
+    try:
+        from lyra.transcription.pipeline import transcribe
+        import mlx.core as mx
+
+        # Release YuE2 models BEFORE transcription (like yue2_studio does)
+        # This prevents SheetSage2 + MERT (~3GB) from stacking on top of YuE2
+        if hasattr(_cover_song, "_pipe") and _cover_song._pipe is not None:
+            _cover_song._pipe.release_models()
+            _cover_song._pipe = None
+            log("[cover] released YuE2 models before transcription")
+
+        # Set strict MLX memory limit BEFORE transcription to prevent stacking
+        # This forces MLX to evict unused tensors when memory gets tight
+        try:
+            import psutil
+            _total_ram_gib = psutil.virtual_memory().total / (1024**3)
+            mx.set_memory_limit(int((_total_ram_gib - 12) * 1024 * 1024 * 1024))  # Reserve 12GB for OS + others
+            mx.set_cache_limit(128 * 1024 * 1024)  # 128MB cache
+            log(f"[cover] set MLX memory limit: {_total_ram_gib - 12:.0f}GB")
+        except Exception as e:
+            log(f"[cover] memory limit warning: {e}")
+
+        # Clear MLX cache before transcription
+        mx.clear_cache()
+        import gc
+        gc.collect()
+
+        result = transcribe(
+            audio=audio_path,
+            output=transcription_dir,
+            task=task,
+            cancelled=lambda: _CLEARED.is_set(),
+            progress=lambda info: progress(
+                info.get("window", 0) / info.get("windows", 1),
+                desc=f"Transcribing... ({info.get('stage', '')})"
+            ) if info.get("stage") == "encoding" else None
+        )
+        log("[transcription] transcription complete")
+
+        # Aggressively free MLX memory after transcription (SheetSage2 + MERT)
+        # Reset memory limit to full for generation phase
+        try:
+            import psutil
+            _total_ram_gib = psutil.virtual_memory().total / (1024**3)
+            mx.set_memory_limit(int((_total_ram_gib - 8) * 1024 * 1024 * 1024))  # Back to normal for generation
+            del result
+            mx.clear_cache()
+            gc.collect()
+            log(f"[cover] freed MLX memory after transcription, limit reset to {_total_ram_gib - 8:.0f}GB")
+        except Exception as e:
+            log(f"[cover] memory cleanup warning: {e}")
+
+    except Exception as e:
+        raise gr.Error(f"Transcription failed: {type(e).__name__}: {e}")
+
+    t_transcribe_end = time.perf_counter()
+    t_transcribe_s = t_transcribe_end - t_transcribe_start
+    log(f"[cover] transcription took {t_transcribe_s:.1f}s")
+
+    # Step 2: Read ABC score
+    abc_path = transcription_dir / "score.abc"
+    if not abc_path.exists():
+        raise gr.Error("Transcription did not produce an ABC file")
+    abc_text = abc_path.read_text(encoding="utf-8").strip()
+
+    if not abc_text:
+        raise gr.Error("Transcription produced empty ABC score")
+
+    log("[transcription] ABC score generated")
+
+    # Step 3: Generate song from ABC
+    log("[cover] generating song from ABC")
+    progress(0.7, desc="Generating song...")
+    t_gen_start = time.perf_counter()
+
+    try:
+        # Load or create pipeline
+        if not hasattr(_cover_song, "_pipe"):
+            _cover_song._pipe = None
+
+        if _cover_song._pipe is None:
+            _cover_song._pipe = Yue2PipelineMLX(
+                model_root=model_dir,
+                variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
+                log=log,
+            )
+
+        result = _cover_song._pipe(
+            style=style.strip() if style else "",
+            lyrics=lyrics.strip() if lyrics else "",
+            cot="full" if task == "full" else "melody",
+            seed=seed,
+            abc=abc_text,
+            cfg_scale=float(cfg_scale) if cfg_scale else None,
+            steps=int(steps),
+            tile_size=int(tile_size),
+            vae_tile=int(vae_tile),
+        )
+    except Exception as e:
+        raise gr.Error(f"Song generation failed: {type(e).__name__}: {e}")
+
+    t_gen_end = time.perf_counter()
+    t_gen_s = t_gen_end - t_gen_start
+    overall_end = time.perf_counter()
+    t_total_s = overall_end - overall_start
+    log(f"[cover] generation took {t_gen_s:.1f}s, total {t_total_s:.1f}s")
+
+    audio = result["audio"]
+    audio_for_save = audio  # Already normalized float32
+    duration_s = audio.shape[0] / 48000.0
+
+    # Free MLX memory after generation
+    try:
+        import mlx.core as mx
+        mx.clear_cache()
+        import gc
+        gc.collect()
+        log("[cover] freed MLX memory after generation")
+    except Exception as e:
+        log(f"[cover] memory cleanup warning: {e}")
+
+    # Save to outputs folder
+    outputs_dir = Path(__file__).parent / "outputs"
+    outputs_dir.mkdir(exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    song_name = f"cover_{timestamp}_s{seed}"
+    song_path = outputs_dir / song_name
+    song_path.mkdir(exist_ok=True)
+
+    # Save audio (WAV or MP3)
+    save_format = save_format or "WAV"
+    is_mp3 = save_format == "MP3"
+    mp3_bitrate = mp3_bitrate or "192k"
+    saved_filepath = None
+
+    if is_mp3:
+        # Save as MP3 using ffmpeg
+        wav_path = song_path / f"{song_name}.wav"
+        mp3_path = song_path / f"{song_name}.mp3"
+        try:
+            if len(audio.shape) == 1:
+                audio = audio.reshape(-1, 1)
+            pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2")
+            import wave
+            with wave.open(str(wav_path), "wb") as wf:
+                wf.setnchannels(1 if len(pcm.shape) == 1 else pcm.shape[1])
+                wf.setsampwidth(2)
+                wf.setframerate(48000)
+                wf.writeframes(pcm.tobytes())
+            import subprocess
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(wav_path), "-b:a", mp3_bitrate, "-ar", "48000", str(mp3_path)],
+                capture_output=True, timeout=120, check=True
+            )
+            wav_path.unlink(missing_ok=True)
+            filename = f"{song_name}.mp3"
+            saved_filepath = str(mp3_path)
+            info = f"Cover saved: {filename}"
+        except Exception as e:
+            info = f"Save error: {e}"
+    else:
+        # Save as WAV (default)
+        filename = f"{song_name}.wav"
+        filepath = song_path / filename
+        try:
+            if len(audio.shape) == 1:
+                audio = audio.reshape(-1, 1)
+            pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2")
+            import wave
+            with wave.open(str(filepath), "wb") as wf:
+                wf.setnchannels(1 if len(pcm.shape) == 1 else pcm.shape[1])
+                wf.setsampwidth(2)
+                wf.setframerate(48000)
+                wf.writeframes(pcm.tobytes())
+            saved_filepath = str(filepath)
+            info = f"Cover saved: {filename}"
+        except Exception as e:
+            info = f"Save error: {e}"
+
+    # Save metadata
+    metadata = {
+        "song_name": song_name,
+        "timestamp": timestamp,
+        "duration_s": round(duration_s, 2),
+        "transcribe_time_s": round(t_transcribe_s, 1),
+        "generation_time_s": round(t_gen_s, 1),
+        "total_time_s": round(t_total_s, 1),
+        "seed": seed,
+        "task": task,
+        "cot": "full" if task == "full" else "melody",
+        "cfg_scale": float(cfg_scale) if cfg_scale else None,
+        "steps": int(steps),
+        "variant": variant,
+        "tile_size": int(tile_size),
+        "vae_tile": int(vae_tile),
+        "style": style.strip() if style else "",
+        "lyrics": lyrics.strip() if lyrics else "",
+        "save_format": save_format,
+        "mp3_bitrate": mp3_bitrate if is_mp3 else None,
+        "filename": filename,
+        "filepath": saved_filepath,
+        "abc": abc_text,
+        "transcription_dir": str(transcription_dir),
+    }
+    try:
+        metadata_path = song_path / "metadata.json"
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+        info += "\nMetadata: metadata.json"
+    except Exception as e:
+        info += f"\nMetadata save error: {e}"
+
+    # Return audio tuple for playback
+    audio_output = (48000, audio)
+    abc_output = abc_text
+    status_output = info
+    pipeline_status = "Done"
+
+    # Clean up temp files
+    import shutil
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return audio_output, abc_output, pipeline_status, status_output, model_status
+
 
 def main():
     parser = argparse.ArgumentParser(description="YUE2 // MLX — Gradio UI for YuE2 on Apple Silicon")
