@@ -88,6 +88,9 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 ### GENERATE Tab
 ![Generate Tab](screenshots/generate.png)
 
+### Cover Tab
+![Cover Tab](screenshots/cover.png)
+
 ### LLM Writing Room
 ![Writing Room](screenshots/writing-room.png)
 
