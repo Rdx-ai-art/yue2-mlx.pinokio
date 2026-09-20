@@ -296,10 +296,9 @@ def _generate_song(
 
     # Return audio tuple for playback, filepath for download
     # If MP3 saved, return file path so download button saves MP3
-    pipeline_status = "Done"
     if saved_filepath and is_mp3:
-        return saved_filepath, abc, pipeline_status, info
-    return audio, abc, pipeline_status, info
+        return saved_filepath, abc, info
+    return audio, abc, info
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +502,8 @@ def build_ui():
         with gr.Tabs():
             # ── TAB 1: Generate ──────────────────────────────────────
             with gr.Tab("01 // GENERATE"):
+                gr.Markdown("Enter Style+Lyrics (or use llm writing room) → Select model+settings → Generate song")
+                gr.Markdown("> 📦 **Required models will be downloaded automatically during first run**")
                 with gr.Row():
                     with gr.Column(scale=3):
                         gr.Markdown("### Song Parameters")
@@ -604,7 +605,6 @@ def build_ui():
                         elem_classes="audio-container",
                     )
                 abc_output = gr.Textbox(label="Generated ABC Score", lines=4)
-                pipeline_status = gr.Textbox(label="🔄 Pipeline Status", interactive=False, value="Idle", lines=1)
                 status_output = gr.Textbox(label="Status", elem_classes="status-box", interactive=False)
 
                 generate_btn.click(
@@ -613,33 +613,13 @@ def build_ui():
                             cfg_scale, steps_input, variant_input, model_dir_input,
                             abc_score_input, tile_size_input, vae_tile_input, save_format_input,
                             mp3_bitrate_input],
-                    outputs=[audio_output, abc_output, pipeline_status, status_output],
+                    outputs=[audio_output, abc_output, status_output],
                 )
 
             # ── TAB 2: COVER ───────────────────────────────────────
             with gr.Tab("02 // COVER"):
-                gr.Markdown("Upload audio → Transcribe → Generate song from the transcription")
-
-                # ── Model Status & Download ───────────────────────
-                gr.Markdown("### Model Status")
-                model_status_cover = gr.Textbox(
-                    label="📦 Model Status",
-                    interactive=False,
-                    value=_check_models(),
-                    lines=1,
-                )
-                with gr.Row():
-                    download_btn_cover = gr.Button("Download Models", variant="secondary", size="sm")
-                model_progress_cover = gr.Textbox(
-                    label="Download Progress",
-                    interactive=False,
-                    value="Ready",
-                    lines=1,
-                )
-                download_btn_cover.click(
-                    fn=_download_models,
-                    outputs=[model_status_cover, model_progress_cover],
-                )
+                gr.Markdown("Upload audio → Enter Style, Lyrics → Transcribe → Generates song from the transcription")
+                gr.Markdown("> 📦 **Required models will be downloaded automatically during first run** (~3GB)")
 
                 with gr.Row():
                     # LEFT side: Upload + Transcription + Generation Settings
@@ -672,12 +652,12 @@ def build_ui():
                         cover_style = gr.Textbox(
                             label="Style (required)",
                             placeholder="indie pop, bright acoustic guitar, warm vocal",
-                            lines=6,
+                            lines=8,
                         )
                         cover_lyrics = gr.Textbox(
                             label="Lyrics (optional — song will use ABC content if left blank)",
                             placeholder="[Verse]\nSoft morning light...",
-                            lines=8,
+                            lines=9,
                         )
                         gr.Markdown("### Save Format")
                         with gr.Row():
@@ -701,8 +681,8 @@ def build_ui():
                 cover_btn.click(
                     fn=_cover_song,
                     inputs=[cover_audio, cover_task, cover_style, cover_lyrics, cover_seed, cover_cfg, cover_steps, variant_input, model_dir_input,
-                            tile_size_input, vae_tile_input, cover_save_format, cover_mp3_bitrate, model_status_cover],
-                    outputs=[cover_audio_output, cover_abc_output, cover_status, model_status_cover],
+                            tile_size_input, vae_tile_input, cover_save_format, cover_mp3_bitrate],
+                    outputs=[cover_audio_output, cover_abc_output, cover_status],
                 )
 
             # ── TAB 3: LLM Writing Room ──────────────────────────────
@@ -958,18 +938,24 @@ def _download_models(progress=gr.Progress()):
     mert_ok = _is_downloaded(mert_dir, ["config.json", "model.safetensors"])
 
     if sheetsage_ok and mert_ok:
+        log(f"[download] SheetSage2 found at: {sheetsage_dir}")
+        log(f"[download] MERT found at: {mert_dir}")
         return "✅ All models downloaded", "Ready"
 
+    log(f"[download] SheetSage2 dir exists: {sheetsage_dir.exists()}")
+    log(f"[download] MERT dir exists: {mert_dir.exists()}")
     from huggingface_hub import snapshot_download
 
     progress(0.0, desc="Downloading SheetSage2...")
     try:
+        log(f"[download] Downloading to: {sheetsage_dir}")
         snapshot_download(
             "m-a-p/SheetSage2",
             local_dir=str(sheetsage_dir),
             resume_download=True,
         )
         progress(0.5, desc="Downloading MERT...")
+        log(f"[download] Downloading to: {mert_dir}")
         snapshot_download(
             "m-a-p/MERT-v2-FullSong",
             local_dir=str(mert_dir),
@@ -981,7 +967,7 @@ def _download_models(progress=gr.Progress()):
 
 
 def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant, model_dir,
-                tile_size, vae_tile, save_format, mp3_bitrate, model_status, progress=gr.Progress()):
+                tile_size, vae_tile, save_format, mp3_bitrate, progress=gr.Progress()):
     """Transcribe audio to ABC, then generate song from the transcribed score."""
     import tempfile
     from pathlib import Path
@@ -994,14 +980,6 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
 
     # Update model status
     model_status = _check_models()
-
-    # Check if models are downloaded (raise error if not)
-    if "not downloaded" in model_status:
-        raise gr.Error(
-            "📦 Models not downloaded!\n\n"
-            "Click the 'Download Models' button above first.\n"
-            "This downloads SheetSage2 + MERT models (~3GB) for audio transcription."
-        )
 
     # Validate task
     if task not in {"full", "melody-full", "melody-vocal"}:
@@ -1049,10 +1027,16 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
         import gc
         gc.collect()
 
+        # Debug: print where models will be downloaded
+        log(f"[cover] transcribe cache_dir: {HF_CACHE}")
+        log(f"[cover] SheetSage2 path: {HF_CACHE}/models/m-a-p-SheetSage2")
+        log(f"[cover] MERT path: {HF_CACHE}/models/m-a-p-MERT-v2-FullSong")
+
         result = transcribe(
             audio=audio_path,
             output=transcription_dir,
             task=task,
+            cache_dir=str(HF_CACHE),
             cancelled=lambda: _CLEARED.is_set(),
             progress=lambda info: progress(
                 info.get("window", 0) / info.get("windows", 1),
@@ -1234,8 +1218,13 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
     except Exception as e:
         info += f"\nMetadata save error: {e}"
 
-    # Return audio tuple for playback
-    audio_output = (48000, audio)
+    # Return audio tuple for playback, filepath for download
+    # If MP3 saved, return file path so download button saves MP3
+    if is_mp3 and saved_filepath:
+        audio_output = saved_filepath
+    else:
+        audio_output = (48000, audio)
+
     abc_output = abc_text
     status_output = info
     pipeline_status = "Done"
@@ -1244,7 +1233,7 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
     import shutil
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    return audio_output, abc_output, pipeline_status, status_output, model_status
+    return audio_output, abc_output, pipeline_status, status_output
 
 
 def main():
