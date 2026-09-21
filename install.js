@@ -12,12 +12,12 @@ module.exports = {
       }
     },
 
-    // 2. Create virtual environment with Python 3.12
+    // 2. Create virtual environment with Python 3.12 using uv
     {
       method: "shell.run",
       params: {
         message: [
-          "python3.12 -m venv env",
+          "uv venv env --python 3.12",
           "./env/bin/pip install --upgrade pip"
         ]
       }

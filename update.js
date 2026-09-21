@@ -21,7 +21,7 @@ module.exports = {
           "if [ \"$CURRENT_PYTHON_MAJOR\" -lt 3 ] || { [ \"$CURRENT_PYTHON_MAJOR\" -eq 3 ] && [ \"$CURRENT_PYTHON_MINOR\" -lt 12 ]; }; then",
           "  echo \"Upgrading Python venv to 3.12...\"",
           "  rm -rf env",
-          "  python3.12 -m venv env",
+          "  uv venv env --python 3.12",
           "  ./env/bin/pip install --upgrade pip",
           "else",
           "  echo \"Python version OK ($CURRENT_PYTHON_MAJOR.$CURRENT_PYTHON_MINOR), skipping venv recreation\"",

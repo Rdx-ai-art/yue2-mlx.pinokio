@@ -7,7 +7,7 @@ module.exports = {
       method: "shell.run",
       params: {
         message: [
-          "python3.12 -m venv env",
+          "uv venv env --python 3.12",
           "./env/bin/pip install --upgrade pip",
           "./env/bin/pip install -r requirements.txt"
         ]
