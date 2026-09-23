@@ -17,8 +17,7 @@ module.exports = {
       method: "shell.run",
       params: {
         message: [
-          "uv venv env --python 3.12",
-          "./env/bin/pip install --upgrade pip"
+          "uv venv env --python 3.12"
         ]
       }
     },
@@ -27,29 +26,16 @@ module.exports = {
     {
       method: "shell.run",
       params: {
-        venv: "env",
-        path: ".",
         message: [
-          "./env/bin/pip install -r requirements.txt"
+          "uv pip install -r requirements.txt"
         ]
       }
     },
 
-    // 4. Download models (NAR + VAE)
-    {
-      when: "{{!exists('models/YuE2-3B-MLX/8bit/model.safetensors')}}",
-      method: "script.start",
-      params: {
-        uri: "download.js"
-      }
-    },
-
-    // 5. Verification
+    // 4. Verification
     {
       method: "shell.run",
       params: {
-        venv: "env",
-        path: ".",
         message: [
           "./env/bin/python -c \"import mlx.core as mx; print('MLX version:', mx.__version__)\"",
           "./env/bin/python -c \"import gradio; print('Gradio version:', gradio.__version__)\"",
