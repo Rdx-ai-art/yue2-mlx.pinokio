@@ -35,7 +35,16 @@ module.exports = {
       }
     },
 
-    // 4. Verification
+    // 4. Download models (NAR + VAE)
+    {
+      when: "{{!exists('models/YuE2-3B-MLX/8bit/model.safetensors')}}",
+      method: "script.start",
+      params: {
+        uri: "download.js"
+      }
+    },
+
+    // 5. Verification
     {
       method: "shell.run",
       params: {
@@ -55,7 +64,7 @@ module.exports = {
     {
       method: "notify",
       params: {
-        html: "<b>Installation complete!</b><br/>Click 'Download Models' in UI to get SheetSage2 + MERT for Cover feature.<br/>Click <b>Start</b> — UI opens in browser."
+        html: "<b>Installation complete!</b><br/>Click <b>Start</b> — UI opens in browser."
       }
     }
   ]

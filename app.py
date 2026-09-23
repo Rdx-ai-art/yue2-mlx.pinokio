@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""YUE2 // GROOVE-MLX — Gradio web UI for YuE2 on Apple Silicon (MLX).
+"""YUE2 // MLX — Gradio web UI for YuE2 on Apple Silicon (MLX).
 
 A streamlined, Mac-optimized Gradio interface that wraps the native MLX
-inference from https://huggingface.co/ahmadw/YuE2-3B-MLX.
+inference from https://huggingface.co/Dirdx/YuE2-3B-MLX-with-Hum-encoder.
 
 Features:
   - Original song generation (style + lyrics → 48 kHz stereo)
@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 try:
     from mlx_inference import Yue2PipelineMLX, ModelVariant
+    from lora import discover_loras, list_hum_adapters
 except ImportError as exc:
     sys.exit(
         "MLX inference files not found. Run Install first, or check that "
@@ -69,12 +70,12 @@ _PIPE_KEY: tuple | None = None
 _LOCK = __import__("threading").Lock()
 
 
-def _load_pipeline(model_dir: str, variant: str, progress=None) -> Yue2PipelineMLX:
+def _load_pipeline(model_dir: str, variant: str, lora_adapters: list = None, lora_scale: float = 1.0, progress=None) -> Yue2PipelineMLX:
     """Load (or reuse) the MLX pipeline. Reuses existing one when settings unchanged."""
     global _PIPE, _PIPE_KEY
 
     mv = _VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT)
-    key = (model_dir, variant)
+    key = (model_dir, variant, tuple(lora_adapters or []), lora_scale)
 
     if _PIPE is not None and _PIPE_KEY == key:
         return _PIPE
@@ -86,7 +87,21 @@ def _load_pipeline(model_dir: str, variant: str, progress=None) -> Yue2PipelineM
 
     if progress is not None:
         progress(0.0, desc="Loading MLX model…")
-    _PIPE = Yue2PipelineMLX(model_dir, variant=mv)
+    
+    # Build LoRA adapter specs
+    lora_specs = []
+    if lora_adapters:
+        lora_dir = Path(model_dir).parent / "loras"
+        if lora_dir.exists():
+            from lora import discover_loras
+            all_loras = discover_loras(lora_dir)
+            # Filter to only selected adapters
+            lora_specs = [l for l in all_loras if l["name"] in lora_adapters]
+    
+    if lora_specs:
+        _PIPE = Yue2PipelineMLX(model_dir, variant=mv, lora_adapters=lora_specs, lora_scale=lora_scale)
+    else:
+        _PIPE = Yue2PipelineMLX(model_dir, variant=mv)
     _PIPE_KEY = key
     return _PIPE
 
@@ -103,12 +118,18 @@ def unload_pipeline():
 # ---------------------------------------------------------------------------
 
 def _generate_song(
-    style, lyrics, cot, seed, cfg_scale, steps, variant, model_dir,
-    abc_text, tile_size, vae_tile, save_format, mp3_bitrate,
+    style, lyrics, cot, seed, cfg_scale, steps, variant,
+    tile_size, vae_tile, save_format,
+    lora_adapters, lora_scale,
+    abc_text=None,
     progress=gr.Progress(),
 ):
     """Generate a song using the MLX pipeline."""
-    pipe = _load_pipeline(model_dir, variant, progress)
+    model_dir = "./models/YuE2-3B-MLX"
+    mp3_bitrate = "320k"
+    t0 = time.perf_counter()
+
+    pipe = _load_pipeline(model_dir, variant, lora_adapters, lora_scale, progress)
 
     if not style.strip():
         raise gr.Error("Style is required (e.g. 'indie pop, warm vocal')")
@@ -116,7 +137,10 @@ def _generate_song(
         raise gr.Error("Lyrics are required")
 
     _CLEARED.clear()
-    t0 = time.perf_counter()
+    # Generate random seed if -1
+    if seed == -1:
+        import secrets
+        seed = secrets.randbelow(2**32)
 
     def _on_token(phase, token):
         if phase == "abc":
@@ -169,6 +193,9 @@ def _generate_song(
     audio = result["audio"]  # MLX array → numpy
     abc = result.get("abc", "")
     duration_s = len(audio) / 48000.0
+
+    # Calculate ABC (COT) time
+    abc_time = result.get("abc_time", None)
 
     # Normalize audio to prevent clipping/distortion
     if isinstance(audio, np.ndarray) and audio.dtype != object:
@@ -271,6 +298,7 @@ def _generate_song(
         "timestamp": timestamp,
         "duration_s": round(duration_s, 2),
         "gen_time_s": round(elapsed, 1),
+        "abc_time_s": round(abc_time, 1) if abc_time else None,
         "seed": seed,
         "cot": cot,
         "steps": int(steps),
@@ -283,6 +311,8 @@ def _generate_song(
         "mp3_bitrate": mp3_bitrate if is_mp3 else None,
         "filename": filename,
         "filepath": saved_filepath,
+        "lora_adapters": lora_adapters or [],
+        "lora_scale": lora_scale,
     }
     if abc and abc.strip():
         metadata["abc"] = abc
@@ -406,46 +436,6 @@ def _parse_lyrics_from_response(content):
     return content.strip(), ""
 
 
-def _detect_models(api_url, api_key):
-    """Detect available models from an OpenAI-compatible API.
-    Returns the first model name as a string, or an error message."""
-    import urllib.request
-    import ssl
-
-    if not api_url.strip():
-        return "Please enter an API URL first"
-
-    # Strip /chat/completions suffix if present
-    base_url = api_url.rstrip("/")
-    if base_url.endswith("/chat/completions"):
-        base_url = base_url.rsplit("/", 1)[0]
-
-    models_url = f"{base_url}/v1/models"
-    headers = {}
-    if api_key.strip():
-        headers["Authorization"] = f"Bearer {api_key.strip()}"
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    req = urllib.request.Request(models_url, headers=headers, method="GET")
-    try:
-        with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-            models = result.get("data", [])
-            if models:
-                first_model = models[0].get("id", "")
-                if first_model:
-                    return first_model
-                return "No model name found (check API response)"
-            return "No models available — load a model in your LLM server"
-    except urllib.error.HTTPError as e:
-        return f"HTTP {e.code}: Check API URL (expected OpenAI-compatible endpoint)"
-    except Exception as e:
-        return f"Connection failed: {type(e).__name__}"
-
-
 _CLEARED = __import__("threading").Event()
 
 
@@ -461,6 +451,47 @@ def _update_task_desc(task):
         "melody-vocal": "**Melody-Vocal** — Transcribe the melody and follow it with the vocal line only.",
     }
     return descriptions.get(task, "")
+
+
+def _update_melody_desc(melody):
+    """Update the melody mode description markdown based on selected mode."""
+    descriptions = {
+        "continue": "**Continue** — The hum's notes open the score; YuE2 writes the rest of the song around them.",
+        "hum_only": "**Hum Only** — Hum is the complete melody, like a cover; the song is as long as the hum.",
+        "ignore": "**Ignore** — YuE2 writes the melody, hum shapes phrasing via lora adapter.",
+    }
+    return descriptions.get(melody, "")
+
+
+# ── Lazy encoder download (only once, on first use) ──────────────────
+_ENCODER_DOWNLOADED = False
+
+
+def _ensure_encoder_downloaded():
+    """Download encoder.safetensors lazily on first generation, only once."""
+    global _ENCODER_DOWNLOADED
+    if _ENCODER_DOWNLOADED:
+        return
+    _ENCODER_DOWNLOADED = True
+    encoder_path = Path(__file__).parent / "models" / "YuE2-3B-MLX" / "encoder.safetensors"
+    if encoder_path.exists():
+        return
+    import subprocess
+    log("[hum] downloading encoder.safetensors (first use)...")
+    try:
+        result = subprocess.run(
+            ["hf", "download", "Dirdx/YuE2-3B-MLX-with-Hum-encoder", "--include", "encoder.safetensors", "--local-dir", "models/YuE2-3B-MLX"],
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if result.returncode == 0:
+            log("[hum] encoder.safetensors downloaded successfully")
+        else:
+            log(f"[hum] encoder download failed: {result.stderr[:200]}")
+    except Exception as e:
+        log(f"[hum] encoder download error: {e}")
 
 
 def _check_models():
@@ -492,7 +523,6 @@ def build_ui():
     with gr.Blocks(
         title="YUE2 // MLX",
     ) as demo:
-
         gr.Markdown(
             "# 🎵 YUE2 // MLX — Mac-Optimized Music Generation\n"
             "Generate complete songs (melody, chords, vocals, accompaniment) from text prompts "
@@ -510,12 +540,12 @@ def build_ui():
                         style_input = gr.Textbox(
                             label="Style",
                             placeholder="indie pop, bright acoustic guitar, warm vocal",
-                            lines=2,
+                            lines=3,
                         )
                         lyrics_input = gr.Textbox(
                             label="Lyrics",
                             placeholder="[Verse]\nSoft morning light...",
-                            lines=5,
+                            lines=7,
                         )
                         with gr.Row():
                             cot_input = gr.Radio(
@@ -524,8 +554,8 @@ def build_ui():
                                 label="ABC Plan",
                             )
                             seed_input = gr.Number(
-                                value=831001,
-                                label="Seed",
+                                value=-1,
+                                label="Seed (-1 = random)",
                                 precision=0,
                             )
                         with gr.Row():
@@ -551,11 +581,6 @@ def build_ui():
 
                     with gr.Column(scale=2):
                         gr.Markdown("### Model Settings")
-                        model_dir_input = gr.Textbox(
-                            label="Model Dir",
-                            value="./models/YuE2-3B-MLX",
-                            lines=1,
-                        )
                         variant_input = gr.Radio(
                             choices=["BF16 (highest quality, 7 GB)", "8-bit (recommended, 4.2 GB)", "4-bit (fastest, 3.4 GB)"],
                             value="8-bit (recommended, 4.2 GB)",
@@ -565,11 +590,6 @@ def build_ui():
                             choices=["WAV", "MP3"],
                             value="WAV",
                             label="Format",
-                        )
-                        mp3_bitrate_input = gr.Radio(
-                            choices=["128k", "192k", "256k", "320k"],
-                            value="192k",
-                            label="MP3 kbps",
                         )
 
                         gr.Markdown("### Advanced Sampling")
@@ -587,6 +607,23 @@ def build_ui():
                             with gr.Row():
                                 sem_k = gr.Slider(1, 200, value=100, step=1, label="Top K")
                                 sem_rep = gr.Slider(0.5, 2.0, value=1.2, step=0.01, label="Rep Pen")
+
+                        gr.Markdown("### LoRA Adapters")
+                        # Discover adapters at startup
+                        lora_dir = Path(__file__).parent / "models" / "loras"
+                        _lora_adapters = discover_loras(lora_dir) if lora_dir.exists() else []
+                        lora_choices = [(a["name"], a["name"]) for a in _lora_adapters]
+                        lora_adapters_input = gr.Dropdown(
+                            choices=lora_choices,
+                            value=[],
+                            label="Select Adapters (stack multiple with Ctrl/Cmd)",
+                            multiselect=True,
+                            interactive=True,
+                        )
+                        lora_scale_input = gr.Slider(
+                            minimum=0.0, maximum=4.0, value=1.0, step=0.1,
+                            label="LoRA Scale (1.0 = as trained)",
+                        )
 
                         generate_btn = gr.Button("🎵 Generate Song", variant="primary", size="lg", elem_classes="generate-btn")
 
@@ -610,9 +647,8 @@ def build_ui():
                 generate_btn.click(
                     fn=_generate_song,
                     inputs=[style_input, lyrics_input, cot_input, seed_input,
-                            cfg_scale, steps_input, variant_input, model_dir_input,
-                            abc_score_input, tile_size_input, vae_tile_input, save_format_input,
-                            mp3_bitrate_input],
+                            cfg_scale, steps_input, variant_input, tile_size_input, vae_tile_input, save_format_input,
+                            lora_adapters_input, lora_scale_input],
                     outputs=[audio_output, abc_output, status_output],
                 )
 
@@ -624,8 +660,9 @@ def build_ui():
                 with gr.Row():
                     # LEFT side: Upload + Transcription + Generation Settings
                     with gr.Column(scale=2):
-                        cover_audio = gr.File(
+                        cover_audio = gr.Audio(
                             label="Upload Audio (MP3/WAV/M4A/OGG/FLAC/WEBM)",
+                            sources=["upload"],
                             type="filepath",
                         )
                         cover_task = gr.Radio(
@@ -642,9 +679,26 @@ def build_ui():
                             outputs=cover_task_desc,
                         )
                         gr.Markdown("### Generation Settings")
-                        cover_seed = gr.Number(value=831001, label="Seed", precision=0)
+                        cover_seed = gr.Number(value=-1, label="Seed (-1 = random)", precision=0)
                         cover_cfg = gr.Slider(minimum=0.5, maximum=3, value=1, step=0.01, label="CFG")
                         cover_steps = gr.Slider(minimum=8, maximum=64, value=8, step=1, label="NAR Steps")
+
+                        gr.Markdown("### LoRA Adapters")
+                        # Discover adapters at startup
+                        lora_dir = Path(__file__).parent / "models" / "loras"
+                        _lora_adapters = discover_loras(lora_dir) if lora_dir.exists() else []
+                        lora_choices = [(a["name"], a["name"]) for a in _lora_adapters]
+                        cover_lora_adapters = gr.Dropdown(
+                            choices=lora_choices,
+                            value=[],
+                            label="Select Adapters (stack multiple with Ctrl/Cmd)",
+                            multiselect=True,
+                            interactive=True,
+                        )
+                        cover_lora_scale = gr.Slider(
+                            minimum=0.0, maximum=4.0, value=1.0, step=0.1,
+                            label="LoRA Scale (1.0 = as trained)",
+                        )
 
                     # RIGHT side: Song Parameters + Save Format
                     with gr.Column(scale=3):
@@ -652,27 +706,22 @@ def build_ui():
                         cover_style = gr.Textbox(
                             label="Style (required)",
                             placeholder="indie pop, bright acoustic guitar, warm vocal",
-                            lines=8,
+                            lines=9,
                         )
                         cover_lyrics = gr.Textbox(
                             label="Lyrics (optional — song will use ABC content if left blank)",
                             placeholder="[Verse]\nSoft morning light...",
-                            lines=9,
+                            lines=16,
                         )
-                        gr.Markdown("### Save Format")
-                        with gr.Row():
-                            cover_save_format = gr.Radio(
-                                choices=["WAV", "MP3"],
-                                value="MP3",
-                                label="Format",
-                            )
-                            cover_mp3_bitrate = gr.Radio(
-                                choices=["128k", "192k", "256k", "320k"],
-                                value="320k",
-                                label="MP3 kbps",
-                            )
+                        gr.Markdown("### Output")
+                        cover_save_format = gr.Radio(
+                            choices=["WAV", "MP3"],
+                            value="MP3",
+                            label="Format",
+                        )
+                        gr.Markdown("*(Model variant shared with Generate tab)*")
+                        cover_btn = gr.Button("🎤 Transcribe & Generate", variant="primary", size="lg", elem_classes="generate-btn")
 
-                cover_btn = gr.Button("🎤 Transcribe & Generate", variant="primary", size="lg", elem_classes="generate-btn")
                 cover_audio_output = gr.Audio(label="Generated Cover Song")
                 with gr.Accordion("Transcribed ABC Score", open=False):
                     cover_abc_output = gr.Textbox(label="", lines=15)
@@ -680,13 +729,138 @@ def build_ui():
 
                 cover_btn.click(
                     fn=_cover_song,
-                    inputs=[cover_audio, cover_task, cover_style, cover_lyrics, cover_seed, cover_cfg, cover_steps, variant_input, model_dir_input,
-                            tile_size_input, vae_tile_input, cover_save_format, cover_mp3_bitrate],
+                    inputs=[cover_audio, cover_task, cover_style, cover_lyrics, cover_seed, cover_cfg, cover_steps, variant_input, cover_save_format, cover_lora_adapters, cover_lora_scale],
                     outputs=[cover_audio_output, cover_abc_output, cover_status],
                 )
 
-            # ── TAB 3: LLM Writing Room ──────────────────────────────
-            with gr.Tab("03 // WRITING ROOM"):
+            # ── TAB 3: HUM TO SONG ───────────────────────────────
+            with gr.Tab("03 // HUM TO SONG"):
+                gr.Markdown("Hum a melody → Add style & lyrics → Generate a complete song")
+                gr.Markdown("> 🎤 **Record/upload your hum** → **Select melody mode** → **Choose hum adapter** → **Generate**")
+
+                with gr.Row():
+                    # LEFT side: hum inputs, settings, and loras
+                    with gr.Column():
+                        gr.Markdown("### Hum Input")
+                        hum_audio = gr.Audio(
+                            label="Drop a recording of your hum or click to choose",
+                            type="filepath",
+                            editable=True,
+                            sources=["upload", "microphone"],
+                        )
+
+                        gr.Markdown("### Melody Mode")
+                        hum_melody = gr.Radio(
+                            choices=["continue", "hum_only", "ignore"],
+                            value="continue",
+                            label="Melody",
+                        )
+                        hum_melody_desc = gr.Markdown(
+                            value="**Continue** — The hum's notes open the score; YuE2 writes the rest of the song around them. **Hum Only** — Hum is the complete melody, like a cover; the song is as long as the hum. **Ignore** — YuE2 writes the melody, hum shapes phrasing via lora adapter."
+                        )
+                        hum_melody.change(
+                            fn=_update_melody_desc,
+                            inputs=hum_melody,
+                            outputs=hum_melody_desc,
+                        )
+
+
+                        gr.Markdown("### Hum Settings")
+                        with gr.Row():
+                            with gr.Column(scale=2):
+                                lora_dir = Path(__file__).parent / "models" / "loras"
+                                _hum_adapters = list_hum_adapters(lora_dir) if lora_dir.exists() else []
+                                hum_adapter_choices = [a["name"] for a in _hum_adapters] if _hum_adapters else [None]
+                                print(f"[hum] Found {len(_hum_adapters)} hum adapter(s): {hum_adapter_choices}")
+
+                                hum_adapter_input = gr.Dropdown(
+                                    label="Hum Lora Adapter",
+                                    choices=hum_adapter_choices,
+                                    value=None,
+                                    allow_custom_value=False,
+                                )
+                                with gr.Row():
+                                    hum_adapter_info = gr.Markdown(f"> **Found**: {len(_hum_adapters)} adapter(s)")
+
+                            with gr.Column(scale=3):
+                                hum_influence = gr.Slider(
+                                    minimum=0.0, maximum=3.0, value=1.0, step=0.05,
+                                    label="Hum influence",
+                                    info="1 = as trained, 0 = ignore hum's phrasing, >1 exaggerates it (costs ~2x synthesis time)"
+                                )
+                                hum_offset = gr.Slider(
+                                    minimum=0.0, maximum=600.0, value=0.0, step=0.1,
+                                    label="Hum starts at (seconds into song)",
+                                    info="0 = song opens with your hum"
+                                )
+
+                        gr.Markdown("### LoRA Adapters (regular, separate from hum adapter)")
+                        _lora_adapters = discover_loras(lora_dir) if lora_dir.exists() else []
+                        lora_choices = [(a["name"], a["name"]) for a in _lora_adapters if a.get("kind") == "lora"]
+                        print(f"[hum] Found {len(lora_choices)} LoRA adapter(s)")
+
+                        hum_lora_adapters = gr.Dropdown(
+                            choices=lora_choices,
+                            value=[],
+                            label="Select Adapters (stack multiple with Ctrl/Cmd)",
+                            multiselect=True,
+                            interactive=True,
+                        )
+                        hum_lora_scale = gr.Slider(
+                            minimum=0.0, maximum=4.0, value=1.0, step=0.1,
+                            label="LoRA Scale (1.0 = as trained)",
+                        )
+
+                    # RIGHT side: song parameters, sampling, and output
+                    with gr.Column():
+                        gr.Markdown("### Song Parameters")
+                        hum_style = gr.Textbox(
+                            label="Style",
+                            placeholder="e.g. indie folk, male vocal, acoustic guitar, stomps and claps, 120 BPM",
+                            lines=8,
+                        )
+                        hum_lyrics = gr.Textbox(
+                            label="Lyrics",
+                            placeholder="[Verse]\n...\n[Chorus]\n...",
+                            lines=18,
+                        )
+                        gr.Markdown("### Sampling Settings")
+                        hum_seed = gr.Number(label="Seed", value=-1, precision=0, info="-1 for random")
+                        with gr.Row():
+                            hum_cfg = gr.Slider(
+                                minimum=0.5, maximum=3.0, value=1.0,
+                                step=0.01, label="CFG",
+                            )
+                            hum_steps = gr.Slider(
+                                minimum=8, maximum=64, value=8,
+                                step=1, label="NAR Steps",
+                            )
+                        gr.Markdown("*(Model variant shared with Generate tab)*")
+
+                        gr.Markdown("### Output")
+                        hum_format = gr.Radio(
+                            choices=["WAV", "MP3"],
+                            value="WAV",
+                            label="Save format",
+                        )
+                        
+
+                with gr.Column():
+                        hum_generate_btn = gr.Button("🎤 Create song from hum", variant="primary", size="lg", elem_classes="generate-btn")
+                        hum_audio_output = gr.Audio(label="Generated song", type="numpy", elem_classes="audio-container")
+                        hum_status = gr.Textbox(label="Status", elem_classes="status-box", interactive=False)
+                        
+                hum_generate_btn.click(
+                    fn=_hum_song,
+                    inputs=[hum_audio, hum_melody, hum_adapter_input, hum_influence, hum_offset,
+                            hum_style, hum_lyrics, hum_seed, hum_cfg, hum_steps,
+                            hum_format,
+                            hum_lora_adapters, hum_lora_scale],
+                    outputs=[hum_audio_output, hum_status],
+                )
+
+            # ── TAB 4: LLM Writing Room ──────────────────────────────
+            with gr.Tab("04 // WRITING ROOM"):
                 gr.Markdown(
                     "### LLM Writing Room\n"
                     "Use an OpenAI-compatible LLM (LM Studio, Ollama, text-generation-webui, etc.) "
@@ -706,8 +880,6 @@ def build_ui():
                             placeholder="auto-detect",
                             info="Leave blank to auto-detect from API, or specify one",
                         )
-                        with gr.Row():
-                            btn_auto_detect = gr.Button("🔍 Auto-detect Model", variant="secondary", size="sm")
                         llm_api_key = gr.Textbox(
                             label="API Key (optional)",
                             placeholder="sk-your-key",
@@ -816,11 +988,6 @@ def build_ui():
                     inputs=[current_lyrics, expand_dir, llm_api_url, llm_model, llm_max_tokens, llm_temp, llm_api_key],
                     outputs=[llm_chat_output, llm_output],
                 )
-                btn_auto_detect.click(
-                    fn=_detect_models,
-                    inputs=[llm_api_url, llm_api_key],
-                    outputs=[llm_model],
-                )
 
                 # Copy buttons — parse lyrics/style from LLM response window and copy to Generate tab
                 def _copy_lyrics_from_output(raw_response):
@@ -852,8 +1019,8 @@ def build_ui():
                     outputs=[cover_style],
                 )
 
-            # ── TAB 3: INFO ────────────────────────────────────────
-            with gr.Tab("04 // INFO"):
+            # ── TAB 5: INFO ────────────────────────────────────────
+            with gr.Tab("05 // INFO"):
                 gr.Markdown("### Generation Parameters")
                 gr.Markdown(
                     "| Parameter | Description | Recommended | Default(lowest ram) |\n"
@@ -896,12 +1063,30 @@ def build_ui():
                     "| **Generation** | ~1.2 min (2 min song) | ~3.1 min (4 min song) |\n"
                 )
 
+                gr.Markdown("### Model Directories")
+                gr.Markdown(
+                    "| Model | Dir |\n"
+                    "|-----------|---------|\n"
+                    "| **YuE2 MLX** | /models/YuE2-3B-MLX |\n"
+                    "| **Cover(Transcription+sheetsage)** | /models/hf_cache |\n"
+                    "| **LoRA** | /models/loras |\n"
+                )
+                
+                gr.Markdown("### Recomended Loras")
+                gr.Markdown(
+                    "| Lora | Description | Download Link |\n"
+                    "|-----------|---------|-------------|\n"
+                    "| **YuE2-instrumental-cot-full-loras** | Makes the model write instrumental music with a section plan. Recomended to use with cot(ABC plan)=full | https://huggingface.co/Mothersuperior/YuE2-instrumental-cot-full-loras/resolve/main/ar_lora_inst_v3abc_comfyui.safetensors |\n"
+                    "| **Hum-to-Song** | Hum a melody for 10 to 30 seconds, add a style line and lyrics, get a finished song that keeps your melody, builds a structure around it, and continues long after your hum stops. | https://huggingface.co/Mothersuperior/YuE2-hum-to-song/resolve/main/humsong_yue2_adapter_v1_comfy.safetensors (recomended),  https://huggingface.co/Mothersuperior/YuE2-hum-to-song/resolve/main/hum_adapter_v1_combined.safetensors |\n"
+                )
+            
                 gr.Markdown("### Tips")
                 gr.Markdown(
                     "- **8-bit variant** gives near-bF16 quality at ~2x decode speed\n"
                     "- Use the **Writing Room** to brainstorm ideas before generating\n"
                     "- Set a **seed** for reproducible results\n"
                     "- **cot=full** generates chord-annotated ABC scores for editing\n"
+                    "- For Hum to song, make sure the input hum audio is loud enough. Also humming in 'la la la la...' tends to produce better results in my testing. \n"
                     "- The MLX backend requires **no PyTorch** — pure Apple Metal\n"
                     "- All generated songs auto-save to `outputs/<song_name>/` with metadata.json\n"
                     "- the song(along with metadata) used for benchmarking on m1 max is saved in 'examples' folder\n"
@@ -918,57 +1103,13 @@ def build_ui():
     return demo
 
 
-def _download_models(progress=gr.Progress()):
-    """Download SheetSage2 + MERT models for Cover feature."""
-    sheetsage_dir = HF_CACHE / "models" / "m-a-p-SheetSage2"
-    mert_dir = HF_CACHE / "models" / "m-a-p-MERT-v2-FullSong"
-
-    def _is_downloaded(dir_path, required_files):
-        """Check if all required files exist in the model directory."""
-        if not dir_path.exists():
-            return False
-        for f in required_files:
-            if not (dir_path / f).exists():
-                return False
-        return True
-
-    # SheetSage2 requires config.json and model.safetensors
-    # MERT requires config.json and pytorch_model.bin
-    sheetsage_ok = _is_downloaded(sheetsage_dir, ["config.json", "infer.py", "configuration_sheetsage2.py"])
-    mert_ok = _is_downloaded(mert_dir, ["config.json", "model.safetensors"])
-
-    if sheetsage_ok and mert_ok:
-        log(f"[download] SheetSage2 found at: {sheetsage_dir}")
-        log(f"[download] MERT found at: {mert_dir}")
-        return "✅ All models downloaded", "Ready"
-
-    log(f"[download] SheetSage2 dir exists: {sheetsage_dir.exists()}")
-    log(f"[download] MERT dir exists: {mert_dir.exists()}")
-    from huggingface_hub import snapshot_download
-
-    progress(0.0, desc="Downloading SheetSage2...")
-    try:
-        log(f"[download] Downloading to: {sheetsage_dir}")
-        snapshot_download(
-            "m-a-p/SheetSage2",
-            local_dir=str(sheetsage_dir),
-            resume_download=True,
-        )
-        progress(0.5, desc="Downloading MERT...")
-        log(f"[download] Downloading to: {mert_dir}")
-        snapshot_download(
-            "m-a-p/MERT-v2-FullSong",
-            local_dir=str(mert_dir),
-            resume_download=True,
-        )
-        return "✅ All models downloaded", "Ready"
-    except Exception as e:
-        return f"❌ Download failed: {e}", "Error"
-
-
-def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant, model_dir,
-                tile_size, vae_tile, save_format, mp3_bitrate, progress=gr.Progress()):
+def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant,
+                save_format, lora_adapters, lora_scale, progress=gr.Progress()):
     """Transcribe audio to ABC, then generate song from the transcribed score."""
+    model_dir = "./models/YuE2-3B-MLX"
+    tile_size = 4096
+    vae_tile = 128
+    mp3_bitrate = "320k"
     import tempfile
     from pathlib import Path
     import json
@@ -985,6 +1126,11 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
     if task not in {"full", "melody-full", "melody-vocal"}:
         raise gr.Error("Invalid task. Must be: full, melody-full, or melody-vocal")
 
+    # Generate random seed if -1
+    if seed == -1:
+        import secrets
+        seed = secrets.randbelow(2**32)
+
     # Create temp directories
     tmp_dir = Path(tempfile.mkdtemp())
     transcription_dir = tmp_dir / "transcription"
@@ -992,8 +1138,11 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
     song_dir = tmp_dir / "song"
     song_dir.mkdir(parents=True, exist_ok=True)
 
-    # Upload audio to temp file
-    audio_path = Path(audio_file) if isinstance(audio_file, str) else Path(audio_file.name)
+    # audio_file is either a file path (upload) or temp file (microphone recording)
+    audio_path = Path(audio_file) if audio_file else None
+    if audio_path and not audio_path.exists():
+        raise gr.Error("No audio provided. Please upload a file or record audio.")
+    log(f"[cover] using audio: {audio_path}")
 
     # Step 1: Transcribe
     log("[transcription] transcribing audio")
@@ -1090,6 +1239,8 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
             _cover_song._pipe = Yue2PipelineMLX(
                 model_root=model_dir,
                 variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
+                lora_adapters=lora_adapters,
+                lora_scale=lora_scale,
                 log=log,
             )
 
@@ -1209,6 +1360,8 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
         "filepath": saved_filepath,
         "abc": abc_text,
         "transcription_dir": str(transcription_dir),
+        "lora_adapters": lora_adapters or [],
+        "lora_scale": lora_scale,
     }
     try:
         metadata_path = song_path / "metadata.json"
@@ -1234,6 +1387,377 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return audio_output, abc_output, pipeline_status, status_output
+
+
+def _hum_song(hum_audio, melody, hum_adapter_name, hum_influence, hum_offset,
+              style, lyrics, seed, cfg_scale, steps,
+              save_format,
+              lora_adapters, lora_scale, progress=gr.Progress()):
+    """Hum-to-song: transcribe hum, continue score, condition decoder with prosody adapter."""
+    model_dir = "./models/YuE2-3B-MLX"
+    mp3_bitrate = "320k"
+    import tempfile
+    from pathlib import Path
+    import json
+    import time
+    import soundfile as sf
+    import subprocess
+
+    log = print
+    _CLEARED.clear()
+    overall_start = time.perf_counter()
+
+    # Read variant from the loaded pipeline (shared with Generate tab)
+    if _PIPE and hasattr(_PIPE, 'variant'):
+        variant = _PIPE.variant
+    else:
+        variant = "8bit"
+    tile_size = 4096
+    vae_tile = 64
+
+    # Validate inputs
+    if not hum_audio:
+        raise gr.Error("No hum audio provided. Please upload or record audio.")
+    if not style.strip():
+        raise gr.Error("Style is required")
+    if not lyrics.strip():
+        raise gr.Error("Lyrics are required")
+
+    # Generate random seed if -1
+    if seed == -1:
+        import secrets
+        seed = secrets.randbelow(2**32)
+
+    # Create temp directories
+    tmp_dir = Path(tempfile.mkdtemp())
+    transcription_dir = tmp_dir / "transcription"
+    transcription_dir.mkdir(parents=True, exist_ok=True)
+    hum_dir = tmp_dir / "hum"
+    hum_dir.mkdir(parents=True, exist_ok=True)
+    song_dir = tmp_dir / "song"
+    song_dir.mkdir(parents=True, exist_ok=True)
+
+    audio_path = Path(hum_audio)
+    if not audio_path.exists():
+        raise gr.Error(f"Hum audio file not found: {hum_audio}")
+
+    # Step 1: Transcribe hum to ABC
+    log("[hum] transcribing hum audio")
+    progress(0.0, desc="Transcribing hum...")
+    t_transcribe_start = time.perf_counter()
+
+    try:
+        from lyra.transcription.pipeline import transcribe
+        import mlx.core as mx
+
+        # Release YuE2 models BEFORE transcription
+        if hasattr(_hum_song, "_pipe") and _hum_song._pipe is not None:
+            _hum_song._pipe.release_models()
+            _hum_song._pipe = None
+            log("[hum] released YuE2 models before transcription")
+
+        # Set strict MLX memory limit
+        try:
+            import psutil
+            _total_ram_gib = psutil.virtual_memory().total / (1024**3)
+            mx.set_memory_limit(int((_total_ram_gib - 12) * 1024 * 1024 * 1024))
+            mx.set_cache_limit(128 * 1024 * 1024)
+        except Exception as e:
+            log(f"[hum] memory limit warning: {e}")
+
+        mx.clear_cache()
+        import gc
+        gc.collect()
+
+        result = transcribe(
+            audio=audio_path,
+            output=transcription_dir,
+            task="melody-vocal",
+            cache_dir=str(HF_CACHE),
+            cancelled=lambda: _CLEARED.is_set(),
+            progress=lambda info: progress(
+                info.get("window", 0) / info.get("windows", 1),
+                desc=f"Transcribing... ({info.get('stage', '')})"
+            ) if info.get("stage") == "encoding" else None
+        )
+        log("[hum] transcription complete")
+    except Exception as e:
+        raise gr.Error(f"Transcription failed: {type(e).__name__}: {e}")
+
+    t_transcribe_end = time.perf_counter()
+    t_transcribe_s = t_transcribe_end - t_transcribe_start
+
+    # Step 2: Read ABC score
+    abc_path = transcription_dir / "score.abc"
+    if not abc_path.exists():
+        raise gr.Error("Transcription did not produce an ABC file")
+    hum_abc = abc_path.read_text(encoding="utf-8").strip()
+
+    if not hum_abc:
+        raise gr.Error("Transcription produced empty ABC score")
+
+    # Trim open score if melody=continue
+    if melody == "continue":
+        from hum import trim_open_score, open_score_has_notes
+        hum_abc_trimmed = trim_open_score(hum_abc)
+        log(f"[hum] ABC before trim: {repr(hum_abc[:200])}")
+        log(f"[hum] ABC after trim: {repr(hum_abc_trimmed[:200])}")
+        if not open_score_has_notes(hum_abc_trimmed):
+            log("[hum] No notes detected in transcription, switching to melody=ignore mode")
+            melody = "ignore"  # Auto-switch to ignore mode
+            hum_abc = hum_abc_trimmed  # Keep the ABC for metadata
+
+    log(f"[hum] ABC score: {len(hum_abc)} chars")
+
+    # Free memory after transcription
+    try:
+        import psutil
+        _total_ram_gib = psutil.virtual_memory().total / (1024**3)
+        mx.set_memory_limit(int((_total_ram_gib - 8) * 1024 * 1024 * 1024))
+        del result
+        mx.clear_cache()
+        gc.collect()
+    except Exception as e:
+        log(f"[hum] memory cleanup warning: {e}")
+
+    # Step 3: Analyze hum and create prosody carrier (if adapter provided)
+    carrier_latents = None
+    adapter_info = None
+    if hum_adapter_name:
+        log(f"[hum] loading hum adapter: {hum_adapter_name}")
+        progress(0.4, desc="Loading hum adapter...")
+
+        # Find adapter
+        lora_dir = Path(__file__).parent / "models" / "loras"
+        all_loras = discover_loras(lora_dir)
+        adapter_info = None
+        for lora in all_loras:
+            if lora["name"] == hum_adapter_name and lora.get("kind") == "hum":
+                adapter_info = lora
+                break
+
+        if not adapter_info:
+            raise gr.Error(f"Hum adapter '{hum_adapter_name}' not found in models/loras/")
+
+        # Decode hum audio to PCM
+        log("[hum] decoding hum audio")
+        try:
+            import librosa
+            samples, sr = librosa.load(str(audio_path), sr=48000, mono=True)
+        except Exception as e:
+            raise gr.Error(f"Failed to read hum audio: {e}")
+
+        # Analyse hum (pitch tracking + carrier)
+        log("[hum] analysing hum (pitch tracking + carrier)")
+        progress(0.5, desc="Analysing hum...")
+        try:
+            from hum import analyse_hum, carrier_stereo
+            analysis = analyse_hum(samples, cancelled=lambda: _CLEARED.is_set())
+            log(f"[hum] hum: {analysis.duration_s:.1f}s, voiced {analysis.voiced_fraction:.0%}")
+
+            # Make stereo for VAE encoder
+            stereo = carrier_stereo(analysis.carrier)
+
+            # Save carrier for debugging
+            sf.write(str(hum_dir / "carrier.flac"), stereo, 48000, subtype="PCM_16")
+
+            # Encode carrier to latents
+            log("[hum] encoding carrier to latents")
+            progress(0.6, desc="Encoding carrier...")
+            # Ensure encoder is downloaded (lazy, only once)
+            _ensure_encoder_downloaded()
+            from vae_encoder import load_encoder, encode
+            # VAE encoder is shared across all variants, stored in models root
+            vae_dir = Path(__file__).parent / "models" / "YuE2-3B-MLX"
+            encoder = load_encoder(vae_dir)
+            carrier_latents = encode(encoder, stereo, cancelled=lambda: _CLEARED.is_set())
+            del encoder
+            log(f"[hum] carrier latents: {carrier_latents.shape}")
+            np.save(str(hum_dir / "carrier_latents.npy"), carrier_latents)
+        except Exception as e:
+            log(f"[hum] hum analysis error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise gr.Error(f"Hum analysis failed: {type(e).__name__}: {e}")
+
+    # Step 4: Generate song
+    log("[hum] generating song")
+    progress(0.8, desc="Generating song...")
+    t_gen_start = time.perf_counter()
+
+    try:
+        # Load or create pipeline
+        if not hasattr(_hum_song, "_pipe"):
+            _hum_song._pipe = None
+
+        # Parse lora_adapters - convert names to path dicts
+        parsed_loras = []
+        if lora_adapters:
+            lora_dir = Path(__file__).parent / "models" / "loras"
+            all_loras = discover_loras(lora_dir)
+            for lora_name in lora_adapters:
+                for lora in all_loras:
+                    if lora["name"] == lora_name and lora.get("kind") == "lora":
+                        parsed_loras.append({
+                            "name": lora["name"],
+                            "path": lora["path"],
+                            "kind": lora["kind"],
+                            "file_hash": lora["file_hash"],
+                            "scale": lora["scale"],
+                        })
+                        break
+
+        if _hum_song._pipe is None:
+            # Use default variant (shared with Generate tab)
+            _hum_song._pipe = Yue2PipelineMLX(
+                model_root=model_dir,
+                variant=ModelVariant.EIGHT_BIT,
+                lora_adapters=parsed_loras,
+                lora_scale=lora_scale,
+                log=log,
+            )
+
+        # Prepare ABC for generation
+        if melody == "hum_only":
+            # Use hum_abc as the complete melody
+            abc_for_pipe = hum_abc
+        elif melody == "continue":
+            # Let AR continue the open score
+            abc_for_pipe = None
+        else:  # ignore
+            # Planner writes its own melody
+            abc_for_pipe = None
+
+        result = _hum_song._pipe(
+            style=style.strip(),
+            lyrics=lyrics.strip(),
+            cot="melody",  # Hum always uses melody mode
+            seed=seed,
+            abc=abc_for_pipe,
+            cfg_scale=float(cfg_scale) if cfg_scale else None,
+            steps=int(steps),
+        )
+    except Exception as e:
+        log(f"[hum] generation error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise gr.Error(f"Song generation failed: {type(e).__name__}: {e}")
+
+    t_gen_end = time.perf_counter()
+    t_gen_s = t_gen_end - t_gen_start
+    overall_end = time.perf_counter()
+    t_total_s = overall_end - overall_start
+    log(f"[hum] generation took {t_gen_s:.1f}s, total {t_total_s:.1f}s")
+
+    audio = result["audio"]
+    duration_s = audio.shape[0] / 48000.0
+
+    # Save to outputs folder
+    outputs_dir = Path(__file__).parent / "outputs"
+    outputs_dir.mkdir(exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    song_name = f"hum_{timestamp}_s{seed}"
+    song_path = outputs_dir / song_name
+    song_path.mkdir(exist_ok=True)
+
+    # Copy original hum source audio to outputs
+    try:
+        src_ext = audio_path.suffix.lstrip(".") or "wav"
+        hum_source_path = song_path / f"{song_name}_hum_source.{src_ext}"
+        import shutil
+        shutil.copy2(audio_path, hum_source_path)
+    except Exception as e:
+        log(f"[hum] warning: failed to copy hum source: {e}")
+
+    # Save audio
+    saved_filepath = None
+    if save_format == "MP3":
+        filename = f"{song_name}.mp3"
+        filepath = song_path / filename
+        try:
+            from scipy.io.wavfile import write as write_wav
+            wav_path = str(song_path / f"{song_name}_temp.wav")
+            write_wav(wav_path, 48000, audio)
+            subprocess.run([
+                "ffmpeg", "-y", "-i", wav_path, "-b:a", mp3_bitrate, "-vn", "-map", "0:a:0", str(filepath)
+            ], check=True, capture_output=True)
+            # Clean up temp WAV file
+            if Path(wav_path).exists():
+                Path(wav_path).unlink()
+            saved_filepath = str(filepath)
+            info = f"Hum to song saved: {filename}"
+        except Exception as e:
+            info = f"Save error: {e}"
+            # Clean up temp WAV file on error too
+            wav_path = str(song_path / f"{song_name}_temp.wav")
+            if Path(wav_path).exists():
+                Path(wav_path).unlink()
+    else:
+        # Save audio as WAV
+        filename = f"{song_name}.wav"
+        filepath = song_path / filename
+        try:
+            if len(audio.shape) == 1:
+                audio = audio.reshape(-1, 1)
+            pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2")
+            import wave
+            with wave.open(str(filepath), "wb") as wf:
+                wf.setnchannels(1 if len(pcm.shape) == 1 else pcm.shape[1])
+                wf.setsampwidth(2)
+                wf.setframerate(48000)
+                wf.writeframes(pcm.tobytes())
+            saved_filepath = str(filepath)
+            info = f"Hum to song saved: {filename}"
+        except Exception as e:
+            info = f"Save error: {e}"
+
+    # Save metadata
+    metadata = {
+        "song_name": song_name,
+        "timestamp": timestamp,
+        "duration_s": round(duration_s, 2),
+        "transcribe_time_s": round(t_transcribe_s, 1),
+        "generation_time_s": round(t_gen_s, 1),
+        "total_time_s": round(t_total_s, 1),
+        "seed": seed,
+        "melody": melody,
+        "hum_adapter": hum_adapter_name,
+        "hum_influence": hum_influence,
+        "hum_offset": hum_offset,
+        "cot": "melody",
+        "cfg_scale": float(cfg_scale) if cfg_scale else None,
+        "steps": int(steps),
+        "variant": variant,
+        "tile_size": int(tile_size),
+        "vae_tile": int(vae_tile),
+        "style": style.strip(),
+        "lyrics": lyrics.strip(),
+        "filename": filename,
+        "filepath": saved_filepath,
+        "hum_abc": hum_abc,
+        "lora_adapters": lora_adapters or [],
+        "lora_scale": lora_scale,
+    }
+    try:
+        metadata_path = song_path / "metadata.json"
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2)
+        info += "\nMetadata: metadata.json"
+    except Exception as e:
+        info += f"\nMetadata save error: {e}"
+
+    # Clean up temp files
+    import shutil
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    # Free MLX memory
+    try:
+        mx.clear_cache()
+        gc.collect()
+    except Exception as e:
+        log(f"[hum] memory cleanup warning: {e}")
+
+    return (48000, audio), info
 
 
 def main():
@@ -1281,7 +1805,6 @@ def main():
 # ---------------------------------------------------------------------------
 # Memory optimization: set MLX env vars before any mlx import
 # ---------------------------------------------------------------------------
-import os
 os.environ.setdefault("MLX_PRINT_ERRORS", "0")
 os.environ.setdefault("MLX_EVAL_CACHE", "1")
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MLX inference wrapper for YuE2-3B.
 
-Wraps the native MLX inference from https://huggingface.co/ahmadw/YuE2-3B-MLX
+Wraps the native MLX inference from https://huggingface.co/Dirdx/YuE2-3B-MLX-with-Hum-encoder
 into a simple callable pipeline compatible with the Gradio UI.
 
 Expected directory structure after install:
@@ -304,12 +304,14 @@ def _tile_ranges(n, tile_size, overlap=0):
 class Yue2PipelineMLX:
     """MLX-powered YuE2 pipeline with a simple callable interface."""
 
-    HUB_REPO = "ahmadw/YuE2-3B-MLX"
+    HUB_REPO = "Dirdx/YuE2-3B-MLX-with-Hum-encoder"
 
-    def __init__(self, model_root: str | Path, variant: ModelVariant = ModelVariant.EIGHT_BIT, log=print):
+    def __init__(self, model_root: str | Path, variant: ModelVariant = ModelVariant.EIGHT_BIT, lora_adapters: list | None = None, lora_scale: float = 1.0, log=print):
         self.model_root = Path(model_root)
         self.variant = variant
         self.variant_dir = self.model_root / variant.value
+        self.lora_adapters = lora_adapters or []
+        self.lora_scale = lora_scale
         self.log = log
 
         # Ensure model files exist — download on-demand if missing
@@ -341,6 +343,11 @@ class Yue2PipelineMLX:
         from yue2_model import load_model
         self.model = load_model(self.variant_dir)
         self.log(f"[model] loaded variant={variant.value}")
+
+        # Apply LoRA adapters if specified
+        if self.lora_adapters:
+            self.log(f"[lora] applying {len(self.lora_adapters)} adapter(s) at scale={lora_scale}")
+            self._apply_lora()
 
     def _ensure_model_files(self):
         """Download model files from HuggingFace if they don't exist locally."""
@@ -420,6 +427,28 @@ class Yue2PipelineMLX:
         """Return estimated download size for a variant."""
         sizes = {"bf16": "~7 GB", "8bit": "~4.2 GB", "4bit": "~3.4 GB"}
         return sizes.get(variant, "~unknown")
+
+    def _apply_lora(self):
+        """Apply LoRA adapters to model weights."""
+        if not self.lora_adapters:
+            return
+        
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from lora import apply_lora
+        
+        # Convert adapter dicts to the format expected by lora.apply_lora
+        adapter_specs = []
+        for adapter in self.lora_adapters:
+            adapter_specs.append({
+                "name": adapter.get("name", "unknown"),
+                "path": Path(adapter["path"]),
+                "kind": adapter.get("kind", "general"),
+                "file_hash": adapter.get("file_hash", ""),
+                "scale": adapter.get("scale", 1.0),
+            })
+        
+        apply_lora(self.model, adapter_specs, self.lora_scale)
 
     def release_models(self):
         """Drop resident AR/NAR/VAE weights (released for cover song transcription)."""

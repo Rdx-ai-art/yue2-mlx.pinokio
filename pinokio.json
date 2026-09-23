@@ -5,7 +5,7 @@
   "platform": "darwin",
   "links": [
     { "title": "YuE2 (upstream)", "value": "https://github.com/multimodal-art-projection/YuE" },
-    { "title": "MLX Model", "value": "https://huggingface.co/ahmadw/YuE2-3B-MLX" },
+    { "title": "MLX Model", "value": "https://huggingface.co/Dirdx/YuE2-3B-MLX-with-Hum-encoder" },
     { "title": "Gradio UI", "value": "https://www.gradio.app" }
   ]
 }

@@ -3,6 +3,7 @@ models/YuE2-3B-MLX/
 models/SheetSage2/
 models/MERT-v2-FullSong/
 models/hf_cache/
+models/loras/
 
 # Generated songs
 outputs/

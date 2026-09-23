@@ -10,7 +10,7 @@ Generate complete songs (melody, chords, vocals, and accompaniment) from text pr
 
 ## ✨ What is YUE2 // MLX?
 
-YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music generation model using native **MLX inference** (from [ahmadw/YuE2-3B-MLX](https://huggingface.co/ahmadw/YuE2-3B-MLX)). It features:
+YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music generation model using native **MLX inference** (from [Dirdx/YuE2-3B-MLX-with-Hum-encoder](https://huggingface.co/Dirdx/YuE2-3B-MLX-with-Hum-encoder)). It features:
 
 - **🎵 Original Song Generation** — Style + lyrics → 48 kHz stereo song
 - **🎵 Cover Song Generation** — Upload audio → Transcribe → Generate song from the transcription, with style and lyrics(optional) input.
@@ -178,6 +178,7 @@ Each generated song gets its own folder in `outputs/` with a `metadata.json` con
 
 - **YuE2 Model:** [multimodal-art-projection/YuE](https://github.com/multimodal-art-projection/YuE)
 - **MLX Port:** [ahmadw/YuE2-3B-MLX](https://huggingface.co/ahmadw/YuE2-3B-MLX)
+- **MLX Port with hum encoder:** [Dirdx/YuE2-3B-MLX-with-Hum-encoder](https://huggingface.co/Dirdx/YuE2-3B-MLX-with-Hum-encoder)
 - **Gradio UI:** Inspired by [yue2-groove](https://github.com/deadjoe/yue2_groove)
 - **Pinokio:** [pinokio.computer](https://pinokio.computer)
 
