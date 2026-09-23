@@ -22,7 +22,7 @@ module.exports = {
           "  echo \"Upgrading Python venv to 3.12...\"",
           "  rm -rf env",
           "  uv venv env --python 3.12",
-          "  ./env/bin/pip install --upgrade pip",
+          "  uv pip install --python ./env/bin/python -r requirements.txt --upgrade",
           "else",
           "  echo \"Python version OK ($CURRENT_PYTHON_MAJOR.$CURRENT_PYTHON_MINOR), skipping venv recreation\"",
           "fi"
@@ -34,10 +34,8 @@ module.exports = {
     {
       method: "shell.run",
       params: {
-        venv: "env",
-        path: ".",
         message: [
-          "./env/bin/pip install -r requirements.txt --upgrade"
+          "uv pip install --python ./env/bin/python -r requirements.txt --upgrade"
         ]
       }
     },
