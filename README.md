@@ -134,6 +134,9 @@ yue2-mlx.pinokio.git/
 ├── mlx_inference.py          # MLX inference wrapper
 ├── yue2_model.py             # AR/NAR Mixture-of-Transformers backbone in MLX
 ├── yue2_vae.py               # Oobleck VAE decoder in MLX
+├── hum_nar.py                # Hum-conditioned acoustic synthesis: lyra's CachedNAR plus prosody-adapter injections
+├── hum.py                    # Hum-to-song helpers: options, open-score trimming, prosody carrier analysis
+├── vae_encoder.py            # MLX YuE2-VAE encoder (used for hum to song) (upstream only ships decoder)
 ├── install.js                # Pinokio install script
 ├── start.js                  # Pinokio start script
 ├── update.js                 # Pinokio update script
@@ -153,7 +156,8 @@ yue2-mlx.pinokio.git/
 └── models/YuE2-3B-MLX/       # Downloaded during install
     ├── bf16/                 # BF16 model (7 GB)
     ├── 8bit/                 # 8-bit model (4.2 GB)
-    └── 4bit/                 # 4-bit model (3.4 GB)
+    ├── 4bit/                 # 4-bit model (3.4 GB)
+    └── encoder.safetensor    # vae_encoder for hum to song feature
 ```
 
 Each generated song gets its own folder in `outputs/` with a `metadata.json` containing:
