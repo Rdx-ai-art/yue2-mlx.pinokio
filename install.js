@@ -27,7 +27,7 @@ module.exports = {
       method: "shell.run",
       params: {
         message: [
-          "uv pip install -r requirements.txt"
+          "uv pip install --python ./env/bin/python -r requirements.txt"
         ]
       }
     },

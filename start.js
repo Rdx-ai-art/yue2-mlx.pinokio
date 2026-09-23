@@ -8,8 +8,7 @@ module.exports = {
       params: {
         message: [
           "uv venv env --python 3.12",
-          "./env/bin/pip install --upgrade pip",
-          "./env/bin/pip install -r requirements.txt"
+          "uv pip install --python ./env/bin/python -r requirements.txt"
         ]
       }
     },
