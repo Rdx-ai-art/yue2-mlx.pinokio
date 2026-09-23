@@ -14,6 +14,7 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 
 - **🎵 Original Song Generation** — Style + lyrics → 48 kHz stereo song
 - **🎵 Cover Song Generation** — Upload audio → Transcribe → Generate song from the transcription, with style and lyrics(optional) input.
+- **🎵 Hum to Song Generation** — Upload/record(Hum) a melody → Add style & lyrics → Generate a complete song, based on it with style and lyrics input.
 - **📝 LLM Writing Room** — Compose lyrics and styles with LM Studio / Ollama / any OpenAI-compatible API
 - **🎼 ABC Score Planning** — Generate editable chord-annotated music scores (full/melody/off modes)
 - **⚡ Pure MLX Backend** — No PyTorch, no CUDA dependencies
@@ -91,8 +92,14 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 ### Cover Tab
 ![Cover Tab](screenshots/cover.png)
 
+### Hum to Song Tab
+![Hum to Song Tab](screenshots/hum.png)
+
 ### LLM Writing Room
 ![Writing Room](screenshots/writing-room.png)
+
+### INFO Tab
+![INFO Tab](screenshots/info.png)
 
 ## 🔧 API Documentation
 
