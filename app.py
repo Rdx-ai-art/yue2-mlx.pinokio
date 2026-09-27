@@ -654,12 +654,13 @@ def build_ui():
 
             # ── TAB 2: COVER ───────────────────────────────────────
             with gr.Tab("02 // COVER"):
-                gr.Markdown("Upload audio → Enter Style, Lyrics → Transcribe → Generates song from the transcription")
+                gr.Markdown("Upload audio → Transcribe to ABC (review/edit notes) → Enter Style & Lyrics → Generate Cover")
                 gr.Markdown("> 📦 **Required models will be downloaded automatically during first run** (~3GB)")
 
                 with gr.Row():
-                    # LEFT side: Upload + Transcription + Generation Settings
-                    with gr.Column(scale=2):
+                    # LEFT side: Upload + Transcription + ABC Score Editor
+                    with gr.Column(scale=1):
+                        gr.Markdown("### 1. Audio Reference & Transcription")
                         cover_audio = gr.Audio(
                             label="Upload Audio (MP3/WAV/M4A/OGG/FLAC/WEBM)",
                             sources=["upload"],
@@ -678,13 +679,37 @@ def build_ui():
                             inputs=cover_task,
                             outputs=cover_task_desc,
                         )
-                        gr.Markdown("### Generation Settings")
-                        cover_seed = gr.Number(value=-1, label="Seed (-1 = random)", precision=0)
-                        cover_cfg = gr.Slider(minimum=0.5, maximum=3, value=1, step=0.01, label="CFG")
-                        cover_steps = gr.Slider(minimum=8, maximum=64, value=8, step=1, label="NAR Steps")
+                        cover_transcribe_btn = gr.Button("🎼 1. Transcribe Audio to ABC", variant="secondary", size="lg")
+
+                        gr.Markdown("### 2. ABC Score (Editable)")
+                        cover_abc = gr.Textbox(
+                            label="ABC Score (Transcribed notes — modify them here before generation)",
+                            placeholder="Click '1. Transcribe Audio to ABC' or paste your own ABC score here...",
+                            lines=14,
+                            interactive=True,
+                        )
+
+                    # RIGHT side: Song Parameters + Generation Settings
+                    with gr.Column(scale=1):
+                        gr.Markdown("### 3. Song Parameters")
+                        cover_style = gr.Textbox(
+                            label="Style (required)",
+                            placeholder="indie pop, bright acoustic guitar, warm vocal",
+                            lines=4,
+                        )
+                        cover_lyrics = gr.Textbox(
+                            label="Lyrics (optional — song will use ABC content if left blank)",
+                            placeholder="[Verse]\nSoft morning light...",
+                            lines=8,
+                        )
+
+                        gr.Markdown("### 4. Generation Settings")
+                        with gr.Row():
+                            cover_seed = gr.Number(value=-1, label="Seed (-1 = random)", precision=0)
+                            cover_cfg = gr.Slider(minimum=0.5, maximum=3, value=1, step=0.01, label="CFG")
+                            cover_steps = gr.Slider(minimum=8, maximum=64, value=8, step=1, label="NAR Steps")
 
                         gr.Markdown("### LoRA Adapters")
-                        # Discover adapters at startup
                         lora_dir = Path(__file__).parent / "models" / "loras"
                         _lora_adapters = discover_loras(lora_dir) if lora_dir.exists() else []
                         lora_choices = [(a["name"], a["name"]) for a in _lora_adapters]
@@ -700,19 +725,6 @@ def build_ui():
                             label="LoRA Scale (1.0 = as trained)",
                         )
 
-                    # RIGHT side: Song Parameters + Save Format
-                    with gr.Column(scale=3):
-                        gr.Markdown("### Song Parameters")
-                        cover_style = gr.Textbox(
-                            label="Style (required)",
-                            placeholder="indie pop, bright acoustic guitar, warm vocal",
-                            lines=9,
-                        )
-                        cover_lyrics = gr.Textbox(
-                            label="Lyrics (optional — song will use ABC content if left blank)",
-                            placeholder="[Verse]\nSoft morning light...",
-                            lines=16,
-                        )
                         gr.Markdown("### Output")
                         cover_save_format = gr.Radio(
                             choices=["WAV", "MP3"],
@@ -720,17 +732,38 @@ def build_ui():
                             label="Format",
                         )
                         gr.Markdown("*(Model variant shared with Generate tab)*")
-                        cover_btn = gr.Button("🎤 Transcribe & Generate", variant="primary", size="lg", elem_classes="generate-btn")
+
+                        with gr.Row():
+                            cover_generate_btn = gr.Button("🎤 2. Generate Cover from ABC", variant="primary", size="lg", elem_classes="generate-btn")
+                            cover_all_in_one_btn = gr.Button("⚡ Transcribe & Generate (1-Click)", variant="secondary", size="lg")
 
                 cover_audio_output = gr.Audio(label="Generated Cover Song")
-                with gr.Accordion("Transcribed ABC Score", open=False):
-                    cover_abc_output = gr.Textbox(label="", lines=15)
                 cover_status = gr.Textbox(label="Status", lines=3)
 
-                cover_btn.click(
+                cover_transcribe_btn.click(
+                    fn=_transcribe_audio_to_abc,
+                    inputs=[cover_audio, cover_task],
+                    outputs=[cover_abc, cover_status],
+                )
+
+                cover_generate_btn.click(
+                    fn=_generate_cover_from_abc,
+                    inputs=[
+                        cover_abc, cover_task, cover_style, cover_lyrics,
+                        cover_seed, cover_cfg, cover_steps, variant_input,
+                        cover_save_format, cover_lora_adapters, cover_lora_scale
+                    ],
+                    outputs=[cover_audio_output, cover_status],
+                )
+
+                cover_all_in_one_btn.click(
                     fn=_cover_song,
-                    inputs=[cover_audio, cover_task, cover_style, cover_lyrics, cover_seed, cover_cfg, cover_steps, variant_input, cover_save_format, cover_lora_adapters, cover_lora_scale],
-                    outputs=[cover_audio_output, cover_abc_output, cover_status],
+                    inputs=[
+                        cover_audio, cover_task, cover_style, cover_lyrics,
+                        cover_seed, cover_cfg, cover_steps, variant_input,
+                        cover_save_format, cover_lora_adapters, cover_lora_scale
+                    ],
+                    outputs=[cover_audio_output, cover_abc, cover_status],
                 )
 
             # ── TAB 3: HUM TO SONG ───────────────────────────────
@@ -1103,80 +1136,60 @@ def build_ui():
     return demo
 
 
-def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant,
-                save_format, lora_adapters, lora_scale, progress=gr.Progress()):
-    """Transcribe audio to ABC, then generate song from the transcribed score."""
-    model_dir = "./models/YuE2-3B-MLX"
-    tile_size = 4096
-    vae_tile = 128
-    mp3_bitrate = "320k"
+def _transcribe_audio_to_abc(audio_file, task, progress=gr.Progress()):
+    """Transcribe audio reference to an ABC score using SheetSage2 / Lyra."""
     import tempfile
     from pathlib import Path
-    import json
     import time
+    import gc
+    import shutil
 
     log = print
     _CLEARED.clear()
-    overall_start = time.perf_counter()
-
-    # Update model status
-    model_status = _check_models()
 
     # Validate task
     if task not in {"full", "melody-full", "melody-vocal"}:
         raise gr.Error("Invalid task. Must be: full, melody-full, or melody-vocal")
 
-    # Generate random seed if -1
-    if seed == -1:
-        import secrets
-        seed = secrets.randbelow(2**32)
+    audio_path = Path(audio_file) if audio_file else None
+    if not audio_path or not audio_path.exists():
+        raise gr.Error("No audio provided. Please upload a file or record audio.")
 
-    # Create temp directories
+    log(f"[cover] using audio for transcription: {audio_path}")
+    progress(0.0, desc="Transcribing audio with SheetSage2...")
+    t_transcribe_start = time.perf_counter()
+
     tmp_dir = Path(tempfile.mkdtemp())
     transcription_dir = tmp_dir / "transcription"
     transcription_dir.mkdir(parents=True, exist_ok=True)
-    song_dir = tmp_dir / "song"
-    song_dir.mkdir(parents=True, exist_ok=True)
-
-    # audio_file is either a file path (upload) or temp file (microphone recording)
-    audio_path = Path(audio_file) if audio_file else None
-    if audio_path and not audio_path.exists():
-        raise gr.Error("No audio provided. Please upload a file or record audio.")
-    log(f"[cover] using audio: {audio_path}")
-
-    # Step 1: Transcribe
-    log("[transcription] transcribing audio")
-    progress(0.0, desc="Transcribing audio...")
-    t_transcribe_start = time.perf_counter()
 
     try:
         from lyra.transcription.pipeline import transcribe
         import mlx.core as mx
 
-        # Release YuE2 models BEFORE transcription (like yue2_studio does)
-        # This prevents SheetSage2 + MERT (~3GB) from stacking on top of YuE2
-        if hasattr(_cover_song, "_pipe") and _cover_song._pipe is not None:
-            _cover_song._pipe.release_models()
-            _cover_song._pipe = None
-            log("[cover] released YuE2 models before transcription")
+        # Release YuE2 models before transcription to prevent RAM stacking
+        unload_pipeline()
+        if hasattr(_generate_cover_from_abc, "_pipe") and _generate_cover_from_abc._pipe is not None:
+            try:
+                _generate_cover_from_abc._pipe.release_models()
+            except Exception:
+                pass
+            _generate_cover_from_abc._pipe = None
+            _generate_cover_from_abc._pipe_key = None
+            log("[cover] released YuE2 cover models before transcription")
 
-        # Set strict MLX memory limit BEFORE transcription to prevent stacking
-        # This forces MLX to evict unused tensors when memory gets tight
         try:
             import psutil
             _total_ram_gib = psutil.virtual_memory().total / (1024**3)
-            mx.set_memory_limit(int((_total_ram_gib - 12) * 1024 * 1024 * 1024))  # Reserve 12GB for OS + others
-            mx.set_cache_limit(128 * 1024 * 1024)  # 128MB cache
+            mx.set_memory_limit(int((_total_ram_gib - 12) * 1024 * 1024 * 1024))
+            mx.set_cache_limit(128 * 1024 * 1024)
             log(f"[cover] set MLX memory limit: {_total_ram_gib - 12:.0f}GB")
         except Exception as e:
             log(f"[cover] memory limit warning: {e}")
 
-        # Clear MLX cache before transcription
         mx.clear_cache()
-        import gc
         gc.collect()
 
-        # Debug: print where models will be downloaded
         log(f"[cover] transcribe cache_dir: {HF_CACHE}")
         log(f"[cover] SheetSage2 path: {HF_CACHE}/models/m-a-p-SheetSage2")
         log(f"[cover] MERT path: {HF_CACHE}/models/m-a-p-MERT-v2-FullSong")
@@ -1194,12 +1207,10 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
         )
         log("[transcription] transcription complete")
 
-        # Aggressively free MLX memory after transcription (SheetSage2 + MERT)
-        # Reset memory limit to full for generation phase
         try:
             import psutil
             _total_ram_gib = psutil.virtual_memory().total / (1024**3)
-            mx.set_memory_limit(int((_total_ram_gib - 8) * 1024 * 1024 * 1024))  # Back to normal for generation
+            mx.set_memory_limit(int((_total_ram_gib - 8) * 1024 * 1024 * 1024))
             del result
             mx.clear_cache()
             gc.collect()
@@ -1208,48 +1219,100 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
             log(f"[cover] memory cleanup warning: {e}")
 
     except Exception as e:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         raise gr.Error(f"Transcription failed: {type(e).__name__}: {e}")
 
     t_transcribe_end = time.perf_counter()
     t_transcribe_s = t_transcribe_end - t_transcribe_start
     log(f"[cover] transcription took {t_transcribe_s:.1f}s")
 
-    # Step 2: Read ABC score
     abc_path = transcription_dir / "score.abc"
     if not abc_path.exists():
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         raise gr.Error("Transcription did not produce an ABC file")
+
     abc_text = abc_path.read_text(encoding="utf-8").strip()
+    shutil.rmtree(tmp_dir, ignore_errors=True)
 
     if not abc_text:
         raise gr.Error("Transcription produced empty ABC score")
 
-    log("[transcription] ABC score generated")
+    status = f"✓ Transcription complete ({t_transcribe_s:.1f}s). You can now review and edit the ABC score before generating."
+    return abc_text, status
 
-    # Step 3: Generate song from ABC
+
+def _generate_cover_from_abc(abc_text, task, style, lyrics, seed, cfg_scale, steps, variant,
+                             save_format, lora_adapters, lora_scale,
+                             transcribe_time_s=None, progress=gr.Progress()):
+    """Generate cover song using YuE2 from the provided ABC score."""
+    model_dir = "./models/YuE2-3B-MLX"
+    tile_size = 4096
+    vae_tile = 128
+    mp3_bitrate = "320k"
+    from pathlib import Path
+    import json
+    import time
+    import gc
+
+    log = print
+    _CLEARED.clear()
+    overall_start = time.perf_counter()
+
+    if not abc_text or not abc_text.strip():
+        raise gr.Error("No ABC score provided. Please transcribe an audio reference first or enter an ABC score manually.")
+
+    cleaned_abc = textwrap.dedent(abc_text).strip()
+
+    if not style or not style.strip():
+        raise gr.Error("Style is required (e.g. 'indie pop, bright acoustic guitar, warm vocal')")
+
+    if seed == -1:
+        import secrets
+        seed = secrets.randbelow(2**32)
+
     log("[cover] generating song from ABC")
-    progress(0.7, desc="Generating song...")
+    progress(0.1, desc="Preparing YuE2 model...")
     t_gen_start = time.perf_counter()
 
     try:
-        # Load or create pipeline
-        if not hasattr(_cover_song, "_pipe"):
-            _cover_song._pipe = None
+        if not hasattr(_generate_cover_from_abc, "_pipe"):
+            _generate_cover_from_abc._pipe = None
+            _generate_cover_from_abc._pipe_key = None
 
-        if _cover_song._pipe is None:
-            _cover_song._pipe = Yue2PipelineMLX(
+        lora_specs = []
+        if lora_adapters:
+            lora_dir = Path(model_dir).parent / "loras"
+            if lora_dir.exists():
+                from lora import discover_loras
+                all_loras = discover_loras(lora_dir)
+                lora_specs = [l for l in all_loras if l["name"] in lora_adapters]
+
+        pipe_key = (model_dir, variant, tuple(lora_adapters or []), lora_scale)
+        if _generate_cover_from_abc._pipe is not None and getattr(_generate_cover_from_abc, "_pipe_key", None) != pipe_key:
+            try:
+                _generate_cover_from_abc._pipe.release_models()
+            except Exception:
+                pass
+            _generate_cover_from_abc._pipe = None
+            _generate_cover_from_abc._pipe_key = None
+
+        if _generate_cover_from_abc._pipe is None:
+            _generate_cover_from_abc._pipe = Yue2PipelineMLX(
                 model_root=model_dir,
                 variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
-                lora_adapters=lora_adapters,
+                lora_adapters=lora_specs if lora_specs else None,
                 lora_scale=lora_scale,
                 log=log,
             )
+            _generate_cover_from_abc._pipe_key = pipe_key
 
-        result = _cover_song._pipe(
+        progress(0.3, desc="Generating cover audio...")
+        result = _generate_cover_from_abc._pipe(
             style=style.strip() if style else "",
             lyrics=lyrics.strip() if lyrics else "",
             cot="full" if task == "full" else "melody",
             seed=seed,
-            abc=abc_text,
+            abc=cleaned_abc,
             cfg_scale=float(cfg_scale) if cfg_scale else None,
             steps=int(steps),
             tile_size=int(tile_size),
@@ -1262,23 +1325,19 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
     t_gen_s = t_gen_end - t_gen_start
     overall_end = time.perf_counter()
     t_total_s = overall_end - overall_start
-    log(f"[cover] generation took {t_gen_s:.1f}s, total {t_total_s:.1f}s")
+    log(f"[cover] generation took {t_gen_s:.1f}s")
 
     audio = result["audio"]
-    audio_for_save = audio  # Already normalized float32
     duration_s = audio.shape[0] / 48000.0
 
-    # Free MLX memory after generation
     try:
         import mlx.core as mx
         mx.clear_cache()
-        import gc
         gc.collect()
         log("[cover] freed MLX memory after generation")
     except Exception as e:
         log(f"[cover] memory cleanup warning: {e}")
 
-    # Save to outputs folder
     outputs_dir = Path(__file__).parent / "outputs"
     outputs_dir.mkdir(exist_ok=True)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -1286,14 +1345,11 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
     song_path = outputs_dir / song_name
     song_path.mkdir(exist_ok=True)
 
-    # Save audio (WAV or MP3)
     save_format = save_format or "WAV"
     is_mp3 = save_format == "MP3"
-    mp3_bitrate = mp3_bitrate or "192k"
     saved_filepath = None
 
     if is_mp3:
-        # Save as MP3 using ffmpeg
         wav_path = song_path / f"{song_name}.wav"
         mp3_path = song_path / f"{song_name}.mp3"
         try:
@@ -1318,7 +1374,6 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
         except Exception as e:
             info = f"Save error: {e}"
     else:
-        # Save as WAV (default)
         filename = f"{song_name}.wav"
         filepath = song_path / filename
         try:
@@ -1336,14 +1391,13 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
         except Exception as e:
             info = f"Save error: {e}"
 
-    # Save metadata
     metadata = {
         "song_name": song_name,
         "timestamp": timestamp,
         "duration_s": round(duration_s, 2),
-        "transcribe_time_s": round(t_transcribe_s, 1),
+        "transcribe_time_s": round(transcribe_time_s, 1) if transcribe_time_s is not None else None,
         "generation_time_s": round(t_gen_s, 1),
-        "total_time_s": round(t_total_s, 1),
+        "total_time_s": round(t_total_s + (transcribe_time_s or 0.0), 1),
         "seed": seed,
         "task": task,
         "cot": "full" if task == "full" else "melody",
@@ -1358,8 +1412,7 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
         "mp3_bitrate": mp3_bitrate if is_mp3 else None,
         "filename": filename,
         "filepath": saved_filepath,
-        "abc": abc_text,
-        "transcription_dir": str(transcription_dir),
+        "abc": cleaned_abc,
         "lora_adapters": lora_adapters or [],
         "lora_scale": lora_scale,
     }
@@ -1371,22 +1424,38 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
     except Exception as e:
         info += f"\nMetadata save error: {e}"
 
-    # Return audio tuple for playback, filepath for download
-    # If MP3 saved, return file path so download button saves MP3
     if is_mp3 and saved_filepath:
         audio_output = saved_filepath
     else:
         audio_output = (48000, audio)
 
-    abc_output = abc_text
-    status_output = info
-    pipeline_status = "Done"
+    return audio_output, info
 
-    # Clean up temp files
-    import shutil
-    shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    return audio_output, abc_output, pipeline_status, status_output
+def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant,
+                save_format, lora_adapters, lora_scale, progress=gr.Progress()):
+    """All-in-one: transcribe audio to ABC, then generate song from the transcribed score."""
+    t_start = time.perf_counter()
+    abc_text, transcribe_status = _transcribe_audio_to_abc(audio_file, task, progress=progress)
+    t_transcribe_s = time.perf_counter() - t_start
+
+    audio_output, gen_status = _generate_cover_from_abc(
+        abc_text=abc_text,
+        task=task,
+        style=style,
+        lyrics=lyrics,
+        seed=seed,
+        cfg_scale=cfg_scale,
+        steps=steps,
+        variant=variant,
+        save_format=save_format,
+        lora_adapters=lora_adapters,
+        lora_scale=lora_scale,
+        transcribe_time_s=t_transcribe_s,
+        progress=progress,
+    )
+    combined_status = f"{transcribe_status}\n\n{gen_status}"
+    return audio_output, abc_text, combined_status
 
 
 def _hum_song(hum_audio, melody, hum_adapter_name, hum_influence, hum_offset,
