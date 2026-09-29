@@ -1231,18 +1231,32 @@ def _cover_song(audio_file, task, style, lyrics, seed, cfg_scale, steps, variant
     t_gen_start = time.perf_counter()
 
     try:
+        # Resolve lora_adapters (list of names from UI) → adapter dicts
+        lora_dir = Path(model_dir).parent / "loras"
+        resolved_loras = []
+        if lora_adapters and lora_dir.exists():
+            all_loras = discover_loras(lora_dir)
+            resolved_loras = [l for l in all_loras if l["name"] in lora_adapters]
+
         # Load or create pipeline
         if not hasattr(_cover_song, "_pipe"):
             _cover_song._pipe = None
 
         if _cover_song._pipe is None:
-            _cover_song._pipe = Yue2PipelineMLX(
-                model_root=model_dir,
-                variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
-                lora_adapters=lora_adapters,
-                lora_scale=lora_scale,
-                log=log,
-            )
+            if resolved_loras:
+                _cover_song._pipe = Yue2PipelineMLX(
+                    model_root=model_dir,
+                    variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
+                    lora_adapters=resolved_loras,
+                    lora_scale=lora_scale,
+                    log=log,
+                )
+            else:
+                _cover_song._pipe = Yue2PipelineMLX(
+                    model_root=model_dir,
+                    variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
+                    log=log,
+                )
 
         result = _cover_song._pipe(
             style=style.strip() if style else "",
