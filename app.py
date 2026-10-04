@@ -1275,36 +1275,32 @@ def _generate_cover_from_abc(abc_text, task, style, lyrics, seed, cfg_scale, ste
     t_gen_start = time.perf_counter()
 
     try:
-        if not hasattr(_generate_cover_from_abc, "_pipe"):
-            _generate_cover_from_abc._pipe = None
-            _generate_cover_from_abc._pipe_key = None
+        # Resolve lora_adapters (list of names from UI) → adapter dicts
+        lora_dir = Path(model_dir).parent / "loras"
+        resolved_loras = []
+        if lora_adapters and lora_dir.exists():
+            all_loras = discover_loras(lora_dir)
+            resolved_loras = [l for l in all_loras if l["name"] in lora_adapters]
 
-        lora_specs = []
-        if lora_adapters:
-            lora_dir = Path(model_dir).parent / "loras"
-            if lora_dir.exists():
-                from lora import discover_loras
-                all_loras = discover_loras(lora_dir)
-                lora_specs = [l for l in all_loras if l["name"] in lora_adapters]
+        # Load or create pipeline
+        if not hasattr(_cover_song, "_pipe"):
+            _cover_song._pipe = None
 
-        pipe_key = (model_dir, variant, tuple(lora_adapters or []), lora_scale)
-        if _generate_cover_from_abc._pipe is not None and getattr(_generate_cover_from_abc, "_pipe_key", None) != pipe_key:
-            try:
-                _generate_cover_from_abc._pipe.release_models()
-            except Exception:
-                pass
-            _generate_cover_from_abc._pipe = None
-            _generate_cover_from_abc._pipe_key = None
-
-        if _generate_cover_from_abc._pipe is None:
-            _generate_cover_from_abc._pipe = Yue2PipelineMLX(
-                model_root=model_dir,
-                variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
-                lora_adapters=lora_specs if lora_specs else None,
-                lora_scale=lora_scale,
-                log=log,
-            )
-            _generate_cover_from_abc._pipe_key = pipe_key
+        if _cover_song._pipe is None:
+            if resolved_loras:
+                _cover_song._pipe = Yue2PipelineMLX(
+                    model_root=model_dir,
+                    variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
+                    lora_adapters=resolved_loras,
+                    lora_scale=lora_scale,
+                    log=log,
+                )
+            else:
+                _cover_song._pipe = Yue2PipelineMLX(
+                    model_root=model_dir,
+                    variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
+                    log=log,
+                )
 
         progress(0.3, desc="Generating cover audio...")
         result = _generate_cover_from_abc._pipe(
