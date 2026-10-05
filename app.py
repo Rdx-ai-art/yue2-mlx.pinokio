@@ -1283,12 +1283,19 @@ def _generate_cover_from_abc(abc_text, task, style, lyrics, seed, cfg_scale, ste
             resolved_loras = [l for l in all_loras if l["name"] in lora_adapters]
 
         # Load or create pipeline
-        if not hasattr(_cover_song, "_pipe"):
-            _cover_song._pipe = None
+        key = (model_dir, variant, tuple(sorted(lora_adapters or [])), lora_scale)
+        if hasattr(_generate_cover_from_abc, "_pipe") and _generate_cover_from_abc._pipe is not None:
+            if getattr(_generate_cover_from_abc, "_pipe_key", None) != key:
+                try:
+                    _generate_cover_from_abc._pipe.release_models()
+                except Exception:
+                    pass
+                _generate_cover_from_abc._pipe = None
+                _generate_cover_from_abc._pipe_key = None
 
-        if _cover_song._pipe is None:
+        if not hasattr(_generate_cover_from_abc, "_pipe") or _generate_cover_from_abc._pipe is None:
             if resolved_loras:
-                _cover_song._pipe = Yue2PipelineMLX(
+                _generate_cover_from_abc._pipe = Yue2PipelineMLX(
                     model_root=model_dir,
                     variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
                     lora_adapters=resolved_loras,
@@ -1296,11 +1303,12 @@ def _generate_cover_from_abc(abc_text, task, style, lyrics, seed, cfg_scale, ste
                     log=log,
                 )
             else:
-                _cover_song._pipe = Yue2PipelineMLX(
+                _generate_cover_from_abc._pipe = Yue2PipelineMLX(
                     model_root=model_dir,
                     variant=_VARIANT_MAP.get(variant, ModelVariant.EIGHT_BIT),
                     log=log,
                 )
+            _generate_cover_from_abc._pipe_key = key
 
         progress(0.3, desc="Generating cover audio...")
         result = _generate_cover_from_abc._pipe(
