@@ -11,6 +11,7 @@ import struct
 from pathlib import Path
 
 import mlx.core as mx
+import mlx.nn as nn
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -222,21 +223,63 @@ def _load_peft_adapter(adapter_dir: Path) -> dict | None:
         return None
 
 
-def apply_lora(model: dict, adapters: list[dict], scale: float = 1.0) -> None:
+class LoRALinear(nn.Module):
+    """Wraps an existing Linear or QuantizedLinear module to apply LoRA adaptations dynamically."""
+
+    def __init__(self, base_layer):
+        super().__init__()
+        self.base_layer = base_layer
+        self.adapters = []
+
+    def add_adapter(self, lora_a: mx.array, lora_b: mx.array, scale: float) -> None:
+        self.adapters.append((lora_a, lora_b, scale))
+
+    def __call__(self, x: mx.array) -> mx.array:
+        out = self.base_layer(x)
+        for lora_a, lora_b, scale in self.adapters:
+            # lora_a: (rank, in_features), lora_b: (out_features, rank)
+            delta = (x.astype(lora_a.dtype) @ lora_a.T) @ lora_b.T
+            out = out + (scale * delta).astype(out.dtype)
+        return out
+
+
+def _find_module_target(root, key_path: str):
+    """Resolve a dot-separated path to (parent_obj, attr_name_or_index)."""
+    parts = key_path.split(".")
+    obj = root
+    for p in parts[:-1]:
+        if p.isdigit():
+            idx = int(p)
+            if idx >= len(obj):
+                return None, None
+            obj = obj[idx]
+        else:
+            if not hasattr(obj, p):
+                return None, None
+            obj = getattr(obj, p)
+    attr = parts[-1]
+    if attr.isdigit():
+        idx = int(attr)
+        if idx >= len(obj):
+            return None, None
+        return obj, idx
+    if hasattr(obj, attr):
+        return obj, attr
+    return None, None
+
+
+def apply_lora(model, adapters: list[dict], scale: float = 1.0) -> None:
     """Apply LoRA adapters to model weights in-place.
 
     Args:
-        model: Model weights dict
+        model: Model instance (nn.Module or weights dict)
         adapters: List of adapter dicts with 'path' and 'scale' keys
         scale: Global scale multiplier (0-4)
     """
-    # Debug: print first 20 model keys to help troubleshoot
-    model_keys = list(model.keys())
-    logger.info(f"Model has {len(model_keys)} keys. First 20: {model_keys[:20]}")
-    
-    # Debug: print NAR-related keys
-    nar_keys = [k for k in model_keys if "nar_" in k]
-    logger.info(f"Model has {len(nar_keys)} NAR keys. Sample: {nar_keys[:10]}")
+    if not isinstance(model, nn.Module) and isinstance(model, dict):
+        logger.info(f"Model dict has {len(model)} keys")
+    else:
+        logger.info(f"Applying LoRA to model instance: {type(model).__name__}")
     
     for adapter in adapters:
         adapter_path = adapter["path"]
@@ -258,7 +301,7 @@ def apply_lora(model: dict, adapters: list[dict], scale: float = 1.0) -> None:
             logger.error(f"Failed to apply adapter {adapter['name']}: {e}")
 
 
-def _apply_peft_lora(model: dict, adapter_data: dict, scale: float) -> None:
+def _apply_peft_lora(model, adapter_data: dict, scale: float) -> None:
     """Apply PEFT-format LoRA adapters.
     
     PEFT format: base_model.model.<module>.lora_{A,B}.weight
@@ -281,7 +324,7 @@ def _apply_peft_lora(model: dict, adapter_data: dict, scale: float) -> None:
             _merge_lora_into_module(model, module_key, lora_tensors["lora_A"], lora_tensors["lora_B"], scale)
 
 
-def _apply_safetensors_lora(model: dict, adapter_data: dict, scale: float) -> None:
+def _apply_safetensors_lora(model, adapter_data: dict, scale: float) -> None:
     """Apply single-file LoRA adapters.
     
     Single file format: layers.N.<block>.<proj>.lora_A / lora_B
@@ -309,44 +352,57 @@ def _apply_safetensors_lora(model: dict, adapter_data: dict, scale: float) -> No
             _merge_lora_into_module(model, module_key, lora_tensors["lora_A"], lora_tensors["lora_B"], scale)
 
 
-def _merge_lora_into_module(model: dict, module_key: str, lora_a: mx.array, lora_b: mx.array, scale: float) -> None:
-    """Merge LoRA weights into a single module.
-
-    Formula: W += scale * (lora_B @ lora_A)
-    """
-    # Normalize module_key to match model dict format from mx.load()
-    # Model keys are like: "model.layers.0.nar_self_attn.v_proj.weight"
-    # LoRA keys may be like: "layers.0.nar_self_attn.v_proj" or "model.layers.0.nar_self_attn.v_proj"
-    
-    # Add .weight suffix if missing
-    if not module_key.endswith(".weight"):
-        model_key = module_key + ".weight"
-    else:
-        model_key = module_key
-    
-    # Add model. prefix if missing
-    if not model_key.startswith("model."):
-        model_key = "model." + model_key
-    
-    # Find the module in the model
-    if model_key not in model:
-        logger.warning(f"Module {module_key} not found in model (checked {model_key}), skipping LoRA")
+def _merge_lora_into_module(model, module_key: str, lora_a: mx.array, lora_b: mx.array, scale: float) -> None:
+    """Apply LoRA weights by wrapping the target module or merging if dict."""
+    if not isinstance(model, nn.Module) and isinstance(model, dict):
+        model_key = module_key if module_key.endswith(".weight") else module_key + ".weight"
+        if not model_key.startswith("model."):
+            model_key = "model." + model_key
+        if model_key not in model:
+            logger.warning(f"Module {module_key} not found in model dict, skipping LoRA")
+            return
+        lora_a_np = np.array(lora_a)
+        lora_b_np = np.array(lora_b)
+        lora_update = scale * (lora_b_np @ lora_a_np)
+        current_weight = np.array(model[model_key])
+        model[model_key] = mx.array(current_weight + lora_update)
         return
 
-    logger.debug(f"Merging LoRA into {module_key} (scale={scale:.4f})")
+    # Clean up prefixes and suffixes
+    cleaned = module_key
+    if cleaned.endswith(".weight"):
+        cleaned = cleaned[:-7]
+    if cleaned.startswith("base_model.model."):
+        cleaned = cleaned[len("base_model.model."):]
 
-    # Convert to numpy for computation
-    lora_a_np = np.array(lora_a)
-    lora_b_np = np.array(lora_b)
+    candidates = [cleaned]
+    if not cleaned.startswith("model."):
+        candidates.append("model." + cleaned)
+    if cleaned.startswith("model."):
+        candidates.append(cleaned[6:])
+    if not cleaned.startswith("model.model."):
+        candidates.append("model." + cleaned)
 
-    # Compute LoRA update: scale * B @ A
-    lora_update = scale * (lora_b_np @ lora_a_np)
+    parent, attr = None, None
+    for cand in candidates:
+        p, a = _find_module_target(model, cand)
+        if p is not None:
+            parent, attr = p, a
+            break
 
-    # Get current weights
-    current_weight = np.array(model[model_key])
+    if parent is None:
+        logger.warning(f"Module {module_key} not found in model, skipping LoRA")
+        return
 
-    # Merge: W += scale * B @ A
-    merged_weight = current_weight + lora_update
+    curr_mod = parent[attr] if isinstance(attr, int) else getattr(parent, attr)
+    if isinstance(curr_mod, LoRALinear):
+        curr_mod.add_adapter(lora_a, lora_b, scale)
+    else:
+        wrapper = LoRALinear(curr_mod)
+        wrapper.add_adapter(lora_a, lora_b, scale)
+        if isinstance(attr, int):
+            parent[attr] = wrapper
+        else:
+            setattr(parent, attr, wrapper)
 
-    # Convert back to MLX array
-    model[model_key] = mx.array(merged_weight)
+    logger.debug(f"Applied LoRA to {module_key} (scale={scale:.4f})")
