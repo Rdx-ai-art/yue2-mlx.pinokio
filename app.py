@@ -9,6 +9,7 @@ Features:
   - LLM Writing Room for lyric/style composition (OpenAI-compatible API)
   - Cover mode with ABC score input
   - All sampling parameters exposed
+  - Gallery to browse, replay and reuse past creations
   - Progress tracking through generation stages
   - Audio playback and download
 
@@ -22,7 +23,9 @@ import os
 import sys
 import textwrap
 import time
+import unicodedata
 import wave
+from datetime import datetime
 from pathlib import Path
 
 # Set HuggingFace cache to our models folder so all downloads go to one place
@@ -517,6 +520,282 @@ def _check_models():
     return "❌ Models not downloaded — click 'Download Models' below"
 
 
+# ---------------------------------------------------------------------------
+# Gallery — browse creations saved in outputs/
+# ---------------------------------------------------------------------------
+
+GALLERY_AUDIO_EXTS = {".mp3", ".wav", ".flac", ".m4a", ".ogg", ".aiff"}
+GALLERY_TYPES = ["All", "Song", "Cover", "Hum"]
+GALLERY_SORTS = ["Newest first", "Oldest first", "Longest first", "Shortest first", "Name A-Z"]
+
+
+def _fmt_duration(seconds) -> str:
+    try:
+        total = int(round(float(seconds)))
+    except (TypeError, ValueError):
+        return "—"
+    if total <= 0:
+        return "—"
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def _fmt_size(num_bytes) -> str:
+    size = float(num_bytes or 0)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and strip accents so "memoire" matches "mémoire"."""
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
+
+
+def _gallery_kind(song_name: str) -> str:
+    name = (song_name or "").lower()
+    if name.startswith("cover_"):
+        return "Cover"
+    if name.startswith("hum_"):
+        return "Hum"
+    return "Song"
+
+
+def _gallery_created(meta: dict, audio: Path) -> datetime:
+    stamp = str(meta.get("timestamp") or "")
+    for fmt in ("%Y%m%d_%H%M%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(stamp, fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromtimestamp(audio.stat().st_mtime)
+    except OSError:
+        return datetime.fromtimestamp(0)
+
+
+def _scan_outputs() -> list[dict]:
+    """Return one entry per saved creation, newest first.
+
+    Folders without audio (or unreadable) are skipped so a half-written
+    generation never breaks the gallery.
+    """
+    items: list[dict] = []
+    outputs_dir = Path(__file__).parent / "outputs"
+    if not outputs_dir.is_dir():
+        return items
+
+    for song_dir in outputs_dir.iterdir():
+        if not song_dir.is_dir():
+            continue
+
+        meta: dict = {}
+        meta_path = song_dir / "metadata.json"
+        if meta_path.is_file():
+            try:
+                loaded = json.loads(meta_path.read_text())
+                if isinstance(loaded, dict):
+                    meta = loaded
+            except (OSError, ValueError):
+                meta = {}
+
+        audio: Path | None = None
+        filename = meta.get("filename")
+        if filename and (song_dir / filename).is_file():
+            audio = song_dir / filename
+        if audio is None:
+            for candidate in sorted(song_dir.iterdir()):
+                if candidate.is_file() and candidate.suffix.lower() in GALLERY_AUDIO_EXTS:
+                    audio = candidate
+                    break
+        if audio is None:
+            continue
+
+        song_name = str(meta.get("song_name") or song_dir.name)
+        try:
+            size = audio.stat().st_size
+        except OSError:
+            size = 0
+
+        items.append({
+            "name": song_name,
+            "kind": _gallery_kind(song_name),
+            "created": _gallery_created(meta, audio),
+            "duration": float(meta.get("duration_s") or 0),
+            "size": size,
+            "style": str(meta.get("style") or ""),
+            "lyrics": str(meta.get("lyrics") or ""),
+            "abc": str(meta.get("abc") or ""),
+            "path": str(audio),
+            "meta": meta,
+        })
+
+    items.sort(key=lambda item: item["created"], reverse=True)
+    return items
+
+
+def _filter_gallery(items: list[dict], query: str = "", kind: str = "All",
+                    sort_by: str = "Newest first") -> list[dict]:
+    query = (query or "").strip().lower()
+    if query:
+        needle = _normalize(query)
+
+        def matches(item: dict) -> bool:
+            haystack = " ".join([
+                item["name"], item["style"], item["lyrics"], item["abc"],
+                str(item["meta"].get("task") or ""),
+                str(item["meta"].get("variant") or ""),
+            ])
+            return needle in _normalize(haystack)
+        items = [item for item in items if matches(item)]
+
+    if kind and kind != "All":
+        items = [item for item in items if item["kind"] == kind]
+
+    if sort_by == "Oldest first":
+        items.sort(key=lambda item: item["created"])
+    elif sort_by == "Longest first":
+        items.sort(key=lambda item: item["duration"], reverse=True)
+    elif sort_by == "Shortest first":
+        items.sort(key=lambda item: item["duration"])
+    elif sort_by == "Name A-Z":
+        items.sort(key=lambda item: item["name"].lower())
+    else:
+        items.sort(key=lambda item: item["created"], reverse=True)
+    return items
+
+
+def _gallery_table(items: list[dict]) -> list[list[str]]:
+    rows = []
+    for item in items:
+        style = " ".join(item["style"].split())
+        if len(style) > 90:
+            style = style[:87] + "…"
+        rows.append([
+            item["created"].strftime("%Y-%m-%d %H:%M"),
+            item["kind"],
+            _fmt_duration(item["duration"]),
+            style,
+        ])
+    return rows
+
+
+def _gallery_summary(items: list[dict], total: int | None = None) -> str:
+    if not items:
+        if total:
+            return "No creation matches these filters."
+        return (
+            "No creations yet — generate a song in **01 // GENERATE** "
+            "and it will show up here."
+        )
+    total = len(items) if total is None else total
+    total_duration = sum(item["duration"] for item in items)
+    plural = "s" if len(items) != 1 else ""
+    if total and len(items) != total:
+        return (
+            f"**{len(items)}** of {total} creations · "
+            f"{_fmt_duration(total_duration)} of music"
+        )
+    return f"**{len(items)}** creation{plural} · {_fmt_duration(total_duration)} of music"
+
+
+def _gallery_refresh(query, kind, sort_by):
+    """Rescan outputs/ and return (table rows, items, summary)."""
+    all_items = _scan_outputs()
+    items = _filter_gallery(all_items, query, kind, sort_by)
+    return _gallery_table(items), items, _gallery_summary(items, len(all_items))
+
+
+def _gallery_details(items, evt: gr.SelectData):
+    """Load the details panel for the row selected in the table."""
+    no_selection = (
+        "Select a creation in the list to see its details.",
+        None, "", "", "",
+        gr.update(visible=False), "", gr.update(visible=False), None,
+    )
+    if not items or evt is None:
+        return no_selection
+
+    index = evt.index
+    if isinstance(index, (list, tuple)):
+        index = index[0] if index else None
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        return no_selection
+    if index < 0 or index >= len(items):
+        return no_selection
+
+    item = items[index]
+    meta = item["meta"]
+
+    title = f"### {item['kind']} — {item['created']:%Y-%m-%d %H:%M}\n`{item['name']}`"
+
+    rows = [
+        ("Created", item["created"].strftime("%Y-%m-%d %H:%M")),
+        ("Duration", _fmt_duration(item["duration"])),
+        ("File", f"{Path(item['path']).name} ({_fmt_size(item['size'])})"),
+        ("Seed", meta.get("seed")),
+        ("Steps", meta.get("steps")),
+        ("CFG", meta.get("cfg_scale")),
+        ("ABC plan", meta.get("cot")),
+        ("Variant", meta.get("variant")),
+        ("Task", meta.get("task")),
+    ]
+    adapters = meta.get("lora_adapters") or []
+    if adapters:
+        rows.append(("LoRA", f"{', '.join(str(a) for a in adapters)} @ {meta.get('lora_scale', 1.0)}"))
+
+    params = ""
+    if item["style"]:
+        params += f"**Style** — {item['style']}\n\n"
+    params += "\n".join(
+        f"- **{label}**: {value}"
+        for label, value in rows
+        if value not in (None, "")
+    )
+
+    meta_view = {k: v for k, v in meta.items() if k not in ("lyrics", "abc")}
+    meta_json = json.dumps(meta_view, indent=2, ensure_ascii=False) if meta_view else ""
+
+    return (
+        title,
+        item["path"],
+        params,
+        item["lyrics"],
+        item["abc"],
+        gr.update(visible=bool(item["abc"])),
+        meta_json,
+        gr.update(visible=bool(meta_json)),
+        item,
+    )
+
+
+def _gallery_load(item):
+    """Copy style, lyrics and seed of a past creation into the Generate tab."""
+    if not item:
+        return gr.update(), gr.update(), gr.update(), "Select a creation in the list first."
+
+    meta = item.get("meta") or {}
+    try:
+        seed = int(meta.get("seed"))
+    except (TypeError, ValueError):
+        seed = -1
+
+    return (
+        gr.update(value=item.get("style") or ""),
+        gr.update(value=item.get("lyrics") or ""),
+        gr.update(value=seed),
+        f"✅ Loaded **{item.get('name')}** — open **01 // GENERATE**.",
+    )
+
+
 def build_ui():
     """Build and return the Gradio Block UI."""
 
@@ -529,7 +808,7 @@ def build_ui():
             "using the YuE2-3B model on Apple Silicon via MLX. No PyTorch needed."
         )
 
-        with gr.Tabs():
+        with gr.Tabs(overflow_behavior="wrap") as main_tabs:
             # ── TAB 1: Generate ──────────────────────────────────────
             with gr.Tab("01 // GENERATE"):
                 gr.Markdown("Enter Style+Lyrics (or use llm writing room) → Select model+settings → Generate song")
@@ -1052,8 +1331,126 @@ def build_ui():
                     outputs=[cover_style],
                 )
 
-            # ── TAB 5: INFO ────────────────────────────────────────
-            with gr.Tab("05 // INFO"):
+            # ── TAB 5: GALLERY ─────────────────────────────────────
+            with gr.Tab("05 // GALLERY"):
+                gr.Markdown(
+                    "### Past creations\n"
+                    "Every generation is auto-saved in `outputs/`. Browse, listen and reuse the "
+                    "style, lyrics or seed of any song you already made."
+                )
+                with gr.Row():
+                    gallery_search = gr.Textbox(
+                        label="Search",
+                        placeholder="style, lyrics, song name…",
+                        scale=4,
+                    )
+                    gallery_kind = gr.Dropdown(
+                        choices=GALLERY_TYPES,
+                        value="All",
+                        label="Type",
+                        scale=1,
+                    )
+                    gallery_sort = gr.Dropdown(
+                        choices=GALLERY_SORTS,
+                        value="Newest first",
+                        label="Sort by",
+                        scale=2,
+                    )
+                    gallery_refresh_btn = gr.Button("🔄 Refresh", scale=1)
+
+                gallery_summary_md = gr.Markdown()
+                gallery_table = gr.Dataframe(
+                    headers=["Date", "Type", "Duration", "Style"],
+                    datatype=["str", "str", "str", "str"],
+                    column_widths=["20%", "9%", "13%", "58%"],
+                    interactive=False,
+                    wrap=True,
+                    max_height=420,
+                    label="Creations — click a row to open it",
+                )
+                gallery_items = gr.State([])
+                gallery_selected = gr.State(None)
+
+                with gr.Row():
+                    with gr.Column(scale=2, min_width=320):
+                        gallery_detail_title = gr.Markdown(
+                            "Select a creation in the list to see its details."
+                        )
+                        gallery_audio = gr.Audio(
+                            label="Preview",
+                            type="filepath",
+                            interactive=False,
+                        )
+                        gallery_load_btn = gr.Button(
+                            "⬅ Use style + lyrics in Generate",
+                            variant="secondary",
+                        )
+                        gallery_load_status = gr.Markdown()
+                    with gr.Column(scale=3):
+                        gallery_params = gr.Markdown()
+                        gallery_lyrics = gr.Textbox(
+                            label="Lyrics",
+                            lines=10,
+                            max_lines=24,
+                            interactive=False,
+                            buttons=["copy"],
+                        )
+                        with gr.Accordion("ABC score", open=False) as gallery_abc_acc:
+                            gallery_abc = gr.Textbox(
+                                label="ABC",
+                                lines=12,
+                                max_lines=24,
+                                interactive=False,
+                                buttons=["copy"],
+                            )
+                        with gr.Accordion("metadata.json", open=False) as gallery_meta_acc:
+                            gallery_meta = gr.Code(
+                                label="Metadata",
+                                language="json",
+                                interactive=False,
+                            )
+
+                gallery_controls = [gallery_search, gallery_kind, gallery_sort]
+                gallery_list_outputs = [gallery_table, gallery_items, gallery_summary_md]
+
+                gallery_search.submit(_gallery_refresh, gallery_controls, gallery_list_outputs)
+                gallery_search.input(
+                    _gallery_refresh,
+                    gallery_controls,
+                    gallery_list_outputs,
+                    trigger_mode="always_last",
+                    show_progress="hidden",
+                )
+                gallery_kind.change(_gallery_refresh, gallery_controls, gallery_list_outputs, show_progress="hidden")
+                gallery_sort.change(_gallery_refresh, gallery_controls, gallery_list_outputs, show_progress="hidden")
+                gallery_refresh_btn.click(_gallery_refresh, gallery_controls, gallery_list_outputs, show_progress="hidden")
+                demo.load(_gallery_refresh, gallery_controls, gallery_list_outputs)
+                # Rescan whenever a tab is opened so a fresh generation shows up immediately.
+                main_tabs.select(_gallery_refresh, gallery_controls, gallery_list_outputs, show_progress="hidden")
+
+                gallery_table.select(
+                    _gallery_details,
+                    inputs=[gallery_items],
+                    outputs=[
+                        gallery_detail_title,
+                        gallery_audio,
+                        gallery_params,
+                        gallery_lyrics,
+                        gallery_abc,
+                        gallery_abc_acc,
+                        gallery_meta,
+                        gallery_meta_acc,
+                        gallery_selected,
+                    ],
+                )
+                gallery_load_btn.click(
+                    _gallery_load,
+                    inputs=[gallery_selected],
+                    outputs=[style_input, lyrics_input, seed_input, gallery_load_status],
+                )
+
+            # ── TAB 6: INFO ────────────────────────────────────────
+            with gr.Tab("06 // INFO"):
                 gr.Markdown("### Generation Parameters")
                 gr.Markdown(
                     "| Parameter | Description | Recommended | Default(lowest ram) |\n"
@@ -1122,6 +1519,7 @@ def build_ui():
                     "- For Hum to song, make sure the input hum audio is loud enough. Also humming in 'la la la la...' tends to produce better results in my testing. \n"
                     "- The MLX backend requires **no PyTorch** — pure Apple Metal\n"
                     "- All generated songs auto-save to `outputs/<song_name>/` with metadata.json\n"
+                    "- Open **05 // GALLERY** to browse, listen and reuse any past creation\n"
                     "- the song(along with metadata) used for benchmarking on m1 max is saved in 'examples' folder\n"
                 )
 

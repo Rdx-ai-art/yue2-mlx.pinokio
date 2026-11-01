@@ -17,6 +17,7 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 - **🎵 Hum to Song Generation** — Upload/record(Hum) a melody → Add style & lyrics → Generate a complete song, based on it with style and lyrics input.
 - **📝 LLM Writing Room** — Compose lyrics and styles with LM Studio / Ollama / any OpenAI-compatible API
 - **🎼 ABC Score Planning** — Generate editable chord-annotated music scores (full/melody/off modes)
+- **🗂️ Gallery** — Browse every past creation, replay it, and reuse its style, lyrics or seed in one click
 - **⚡ Pure MLX Backend** — No PyTorch, no CUDA dependencies
 - **🖥️ Gradio Web UI** —Simple, Beautiful browser interface with progress tracking
 
@@ -84,6 +85,16 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 - **VAE Tile** — Set for lowering memory usage.Default is set for lowest peak ram usage.
 - **NAR Tile** — Optional method to further lower memory usage, marginal speedup, but beware of occasional artifacts in generations.
 
+### 4. Browse Past Creations
+
+1. Go to **05 // GALLERY** tab
+2. Every song saved in `outputs/` is listed there (newest first): date, type (Song / Cover / Hum), duration and style
+3. Use **Search** (style, lyrics, song name — accents optional), **Type** and **Sort by** to find a specific track
+4. **Click a row** to open its details: audio preview, generation parameters, lyrics, ABC score and `metadata.json`
+5. Click **⬅ Use style + lyrics in Generate** to load that style, lyrics and seed back into the Generate tab and iterate on it
+
+The list refreshes automatically when the tab is opened (and with the **🔄 Refresh** button), so a song you just generated shows up right away.
+
 ## 📸 Screenshots
 
 ### GENERATE Tab
@@ -97,6 +108,9 @@ YUE2 // MLX is a Mac-optimized Pinokio app that wraps the **YuE2-3B** music gene
 
 ### LLM Writing Room
 ![Writing Room](screenshots/writing-room.png)
+
+### Gallery Tab
+![Gallery Tab](screenshots/gallery.png)
 
 ### INFO Tab
 ![INFO Tab](screenshots/info.png)
